@@ -1,19 +1,19 @@
 #![allow(dead_code)]
 
-use std::any::TypeId;
-
-use crate::evaluate::{Evaluation, FragmentState};
-use crate::FragmentUpdate;
+use crate::evaluate::{Evaluate, Evaluation, FragmentState};
 use crate::{fragment::Threaded, FragmentEvent, FragmentId};
+use crate::{EvaluateSet, FragmentUpdate};
 use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
 use bevy::utils::{all_tuples_with_size, HashSet};
+use std::any::TypeId;
 
 pub struct SequencePlugin;
 
 impl Plugin for SequencePlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(AddedSystems(Default::default()));
+        app.insert_resource(AddedSystems(Default::default()))
+            .add_systems(FragmentUpdate, update_sequence_items.in_set(EvaluateSet));
     }
 }
 
@@ -29,6 +29,11 @@ pub struct Fragment;
 /// An event emitted when a leaf fragment should emit its own value.
 #[derive(Debug, Event, Clone, Copy)]
 pub struct FragmentEmit(FragmentId);
+
+/// A root fragment.
+#[derive(Debug, Default, Component)]
+#[require(Fragment)]
+pub struct Root;
 
 /// A leaf fragment.
 ///
@@ -118,6 +123,30 @@ pub struct SequenceContainer<F> {
     id: FragmentId,
 }
 
+fn update_sequence_items(
+    q: Query<(&Children, &FragmentState), With<Sequence>>,
+    mut children: Query<(&mut Evaluation, &FragmentState)>,
+) {
+    for (seq, outer_state) in q.iter() {
+        // look for the first item that has finished equal to the container
+        let mut first_selected = false;
+        for child in seq.iter() {
+            let Ok((mut eval, state)) = children.get_mut(*child) else {
+                continue;
+            };
+
+            if !first_selected && state.completed <= outer_state.completed {
+                first_selected = true;
+                eval.merge(true.evaluate());
+
+                continue;
+            }
+
+            eval.merge(false.evaluate());
+        }
+    }
+}
+
 macro_rules! seq_frag {
     ($count:literal, $($ty:ident),*) => {
         #[allow(non_snake_case)]
@@ -156,5 +185,60 @@ fn test() -> impl IntoFragment<(), String> {
 impl IntoFragment<(), String> for &'static str {
     fn into_fragment(self, context: &(), commands: &mut Commands) -> FragmentId {
         <_ as IntoFragment<(), String>>::into_fragment(DataLeaf::new(self), context, commands)
+    }
+}
+
+fn descend_tree(
+    node: Entity,
+    evaluation: Evaluation,
+    fragments: &Query<(&Evaluation, Option<&Children>, Option<&Leaf>)>,
+    leaves: &mut Vec<(Entity, Evaluation)>,
+) {
+    let Ok((eval, children, leaf)) = fragments.get(node) else {
+        return;
+    };
+
+    let new_eval = *eval & evaluation;
+
+    if new_eval.result.unwrap_or_default() {
+        if leaf.is_some() {
+            leaves.push((node, new_eval));
+        } else {
+            for child in children.iter().flat_map(|c| c.iter()) {
+                descend_tree(*child, new_eval, fragments, leaves);
+            }
+        }
+    }
+}
+
+fn evaluate_fragments<Data>(
+    roots: Query<(Entity, &Evaluation), With<Root>>,
+    fragments: Query<(&Evaluation, Option<&Children>, Option<&Leaf>)>,
+    leaf_data: Query<&DataLeaf<Data>>,
+    mut writer: EventWriter<FragmentEvent<Data>>,
+    mut commands: Commands,
+) where
+    Data: Threaded + Clone,
+{
+    // traverse trees to build up full evaluatinos
+    let mut leaves = Vec::new();
+
+    for (root, eval) in roots.iter() {
+        descend_tree(root, *eval, &fragments, &mut leaves);
+    }
+
+    leaves.sort_by_key(|(_, e)| e.count);
+
+    if let Some((_, eval)) = leaves.first() {
+        let selections = leaves.iter().take_while(|e| e.1.count == eval.count);
+
+        for (fragment, _) in selections {
+            if let Ok(leaf) = leaf_data.get(*fragment) {
+                writer.send(FragmentEvent {
+                    id: FragmentId(*fragment),
+                    data: leaf.0.clone(),
+                });
+            }
+        }
     }
 }

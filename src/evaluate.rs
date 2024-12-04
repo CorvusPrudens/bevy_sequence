@@ -78,6 +78,24 @@ impl Evaluation {
     }
 }
 
+impl core::ops::BitAnd for Evaluation {
+    type Output = Self;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        match (self.result, rhs.result) {
+            (Some(a), Some(b)) => Evaluation {
+                result: Some(a && b),
+                count: self.count + rhs.count,
+            },
+            (Some(false), _) | (_, Some(false)) => Evaluation {
+                result: Some(false),
+                count: self.count + rhs.count,
+            },
+            _ => self,
+        }
+    }
+}
+
 #[derive(Debug, Component, Default, Clone, Copy, PartialEq, Eq)]
 pub struct FragmentState {
     pub triggered: usize,
