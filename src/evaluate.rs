@@ -68,13 +68,7 @@ pub struct Evaluation {
 
 impl Evaluation {
     pub fn merge(&mut self, other: Evaluation) {
-        match (&mut self.result, other.result) {
-            (Some(a), Some(b)) => {
-                *a &= b;
-                self.count += other.count;
-            }
-            _ => {}
-        }
+        *self = *self & other;
     }
 }
 
@@ -83,15 +77,12 @@ impl core::ops::BitAnd for Evaluation {
 
     fn bitand(self, rhs: Self) -> Self::Output {
         match (self.result, rhs.result) {
-            (Some(a), Some(b)) => Evaluation {
+            (Some(a), Some(b)) => Self {
                 result: Some(a && b),
                 count: self.count + rhs.count,
             },
-            (Some(false), _) | (_, Some(false)) => Evaluation {
-                result: Some(false),
-                count: self.count + rhs.count,
-            },
-            _ => self,
+            (None, Some(_)) => rhs,
+            (Some(_), None) | (None, None) => self,
         }
     }
 }

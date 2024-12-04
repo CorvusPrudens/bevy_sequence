@@ -2,8 +2,7 @@ use bevy::{app::MainScheduleOrder, ecs::schedule::ScheduleLabel, prelude::*};
 
 pub mod evaluate;
 pub mod fragment;
-
-mod fragment2;
+pub mod fragment2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Component)]
 pub struct FragmentId(Entity);
@@ -100,7 +99,7 @@ impl Plugin for SequencePlugin {
 
 /// Schedule to emit events from fragments to ensure visibility in a bevy update schedules.
 #[derive(ScheduleLabel, Debug, Clone, Copy, Hash, PartialEq, Eq)]
-struct FragmentUpdate;
+pub struct FragmentUpdate;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 struct EvaluateSet;

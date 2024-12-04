@@ -363,7 +363,7 @@ pub trait FragmentExt: Sized {
             _marker: PhantomData,
         }
     }
-    //
+
     /// Wrap this fragment in an evaluation.
     fn eval<S, M, O>(self, system: S) -> Evaluated<Self, Unregistered<S::System>, O>
     where

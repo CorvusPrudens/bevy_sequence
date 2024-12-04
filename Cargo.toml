@@ -5,3 +5,7 @@ edition = "2021"
 
 [dependencies]
 bevy = "0.15"
+rand = "0.8"
+
+[dev-dependencies]
+bevy = { version = "0.15", features = ["bevy_debug_stepping"] }
