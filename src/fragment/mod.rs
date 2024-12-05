@@ -6,6 +6,7 @@ use crate::Threaded;
 use bevy_ecs::prelude::*;
 use bevy_hierarchy::prelude::*;
 
+pub mod children;
 mod leaf;
 
 pub(crate) use leaf::respond_to_leaf;

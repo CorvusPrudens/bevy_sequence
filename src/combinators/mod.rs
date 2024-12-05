@@ -1,6 +1,7 @@
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 
+pub mod choice;
 pub mod evaluated;
 pub mod limit;
 pub mod sequence;
