@@ -1,5 +1,5 @@
 use crate::FragmentId;
-use bevy::prelude::*;
+use bevy_ecs::prelude::*;
 use std::collections::{hash_map::Entry, HashMap};
 
 pub trait Evaluate: sealed::Sealed {

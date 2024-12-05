@@ -1,15 +1,16 @@
 #![allow(dead_code)]
 
 use crate::evaluate::{Evaluate, Evaluation};
-use crate::FragmentUpdate;
-use crate::{fragment::Threaded, FragmentId};
-use bevy::app::MainScheduleOrder;
-use bevy::ecs::component::StorageType;
-use bevy::ecs::event::EventRegistry;
-use bevy::ecs::schedule::ScheduleLabel;
-use bevy::ecs::system::SystemId;
-use bevy::prelude::*;
-use bevy::utils::{all_tuples_with_size, HashSet};
+use crate::{FragmentId, Threaded};
+
+use bevy_app::prelude::*;
+use bevy_ecs::component::StorageType;
+use bevy_ecs::event::EventRegistry;
+use bevy_ecs::prelude::*;
+use bevy_ecs::schedule::{ScheduleLabel, SystemSet};
+use bevy_ecs::system::SystemId;
+use bevy_hierarchy::prelude::*;
+use bevy_utils::{all_tuples_with_size, HashSet};
 use std::any::TypeId;
 use std::marker::PhantomData;
 
@@ -32,20 +33,23 @@ pub enum SequenceSets {
 
 impl Plugin for SequencePlugin {
     fn build(&self, app: &mut App) {
-        app.init_schedule(FragmentUpdate);
-        app.world_mut()
-            .resource_mut::<MainScheduleOrder>()
-            .insert_before(PreUpdate, FragmentUpdate);
-
         app.insert_resource(AddedSystems(Default::default()))
             .insert_resource(SelectedFragments::default())
             .add_event::<FragmentEndEvent>()
             .add_systems(
-                FragmentUpdate,
+                PreUpdate,
                 (
-                    (update_sequence_items, custom_evals, evaluate_limits)
+                    (
+                        update_sequence_items,
+                        custom_evals_ids,
+                        custom_evals,
+                        evaluate_limits,
+                    )
                         .in_set(SequenceSets::Evaluate),
                     select_fragments.in_set(SequenceSets::Select),
+                    apply_deferred
+                        .after(SequenceSets::Evaluate)
+                        .before(SequenceSets::Select),
                 ),
             )
             .add_systems(
@@ -56,12 +60,14 @@ impl Plugin for SequencePlugin {
                 ),
             )
             .configure_sets(
-                FragmentUpdate,
+                PreUpdate,
                 (
                     SequenceSets::Select.after(SequenceSets::Evaluate),
                     SequenceSets::Emit.after(SequenceSets::Select),
                 ),
-            );
+            )
+            .add_observer(sequence_begin_observer)
+            .add_observer(sequence_end_observer);
     }
 }
 
@@ -94,10 +100,25 @@ pub trait FragmentExt: Sized {
     /// Wrap this fragment in an evaluation.
     fn eval<S, O, M>(self, system: S) -> Evaluated<Self, S, O, M>
     where
-        S: IntoSystem<In<FragmentId>, O, M> + 'static,
+        S: IntoSystem<(), O, M> + 'static,
         O: Evaluate + 'static,
     {
         Evaluated {
+            fragment: self,
+            evaluation: system,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Wrap this fragment in an evaluation.
+    ///
+    /// This will pass the fragment's ID to the provided systme.
+    fn eval_id<S, O, M>(self, system: S) -> EvaluatedWithId<Self, S, O, M>
+    where
+        S: IntoSystem<In<FragmentId>, O, M> + 'static,
+        O: Evaluate + 'static,
+    {
+        EvaluatedWithId {
             fragment: self,
             evaluation: system,
             _marker: PhantomData,
@@ -207,8 +228,22 @@ impl<T> DataLeaf<T> {
     }
 }
 
-#[derive(Resource)]
+#[derive(Resource, Default)]
 struct AddedSystems(HashSet<TypeId>);
+
+fn add_systems_checked<M, S, C>(world: &mut World, schedule: S, systems: C)
+where
+    S: ScheduleLabel,
+    C: IntoSystemConfigs<M> + Send + 'static,
+{
+    let id = TypeId::of::<(S, C)>();
+    let mut pairs = world.get_resource_or_insert_with(AddedSystems::default);
+
+    if pairs.0.insert(id) {
+        let mut schedules = world.resource_mut::<Schedules>();
+        schedules.add_systems(schedule, systems);
+    }
+}
 
 trait AddSystemsChecked: Sized {
     /// Queues inserting systems into a schedule.
@@ -227,13 +262,7 @@ impl<'w, 's> AddSystemsChecked for Commands<'w, 's> {
         C: IntoSystemConfigs<M> + Send + 'static,
     {
         self.queue(|world: &mut World| {
-            let id = TypeId::of::<(S, C)>();
-            let mut pairs = world.get_resource_or_insert_with(|| AddedSystems(Default::default()));
-
-            if pairs.0.insert(id) {
-                let mut schedules = world.resource_mut::<Schedules>();
-                schedules.add_systems(schedule, systems);
-            }
+            add_systems_checked(world, schedule, systems);
         });
     }
 }
@@ -243,11 +272,13 @@ where
     Data: From<T> + Clone,
 {
     fn into_fragment(self, _: &Context, commands: &mut Commands) -> FragmentId {
-        commands.add_systems_checked(
-            FragmentUpdate,
-            emit_leaves::<Data>.in_set(SequenceSets::Emit),
-        );
         commands.queue(|world: &mut World| {
+            add_systems_checked(
+                world,
+                PreUpdate,
+                emit_leaves::<Data>.in_set(SequenceSets::Emit),
+            );
+
             if !world.contains_resource::<Events<FragmentEvent<Data>>>() {
                 EventRegistry::register_event::<FragmentEvent<Data>>(world);
             }
@@ -267,8 +298,6 @@ fn emit_leaves<Data>(
 ) where
     Data: Threaded + Clone,
 {
-    info!("selected: {selected_fragments:?}");
-
     for fragment in selected_fragments.0.iter().copied() {
         if let Ok((leaf, mut state)) = leaves.get_mut(fragment) {
             let event = EventId::new();
@@ -334,8 +363,6 @@ fn update_sequence_items(
     mut children: Query<(&mut Evaluation, &FragmentState)>,
 ) {
     for (seq, outer_state) in q.iter() {
-        info!("outer: {outer_state:?}");
-
         let inactive = outer_state.active_events.is_empty();
 
         // look for the first item that has finished equal to the container
@@ -385,83 +412,77 @@ pub enum EndKind {
     Visit,
 }
 
-fn spawn_sequence(children: &[Entity], commands: &mut Commands) -> FragmentId {
-    let id = commands.spawn(Sequence).add_children(children).id();
+fn sequence_begin_observer(
+    trigger: Trigger<BeginEvent>,
+    mut parent: Query<(&mut FragmentState, &Children), With<Sequence>>,
+    child: Query<&Parent>,
+    mut commands: Commands,
+) {
+    let child_id = trigger.entity();
+    let Ok(parent_id) = child.get(child_id).map(|p| p.get()) else {
+        return;
+    };
 
-    let first = children.first().copied();
-    let last = children.last().copied();
+    let Ok((mut state, children)) = parent.get_mut(parent_id) else {
+        return;
+    };
 
-    // spawn begin observer
-    let mut observer = Observer::new(
-        move |trigger: Trigger<BeginEvent>,
-              mut q: Query<&mut FragmentState>,
-              mut commands: Commands| {
-            if let Ok(mut state) = q.get_mut(id) {
-                let first = first.is_some_and(|f| f == trigger.entity());
-                state.active_events.insert(trigger.id.event);
+    let first = children.first().is_some_and(|f| *f == child_id);
+    state.active_events.insert(trigger.id.event);
 
-                let kind = if first && trigger.kind == BeginKind::Start {
-                    state.triggered += 1;
-                    BeginKind::Start
-                } else {
-                    BeginKind::Visit
-                };
+    let kind = if first && trigger.kind == BeginKind::Start {
+        state.triggered += 1;
+        BeginKind::Start
+    } else {
+        BeginKind::Visit
+    };
 
-                commands.trigger_targets(
-                    BeginEvent {
-                        id: trigger.id,
-                        kind,
-                    },
-                    id,
-                );
-
-                info!("observed begin event! {trigger:?}");
-            }
+    commands.trigger_targets(
+        BeginEvent {
+            id: trigger.id,
+            kind,
         },
+        parent_id,
     );
 
-    for child in children {
-        observer.watch_entity(*child);
+    // info!("observed begin event! {trigger:?}");
+}
+
+fn sequence_end_observer(
+    trigger: Trigger<EndEvent>,
+    mut parent: Query<(&mut FragmentState, &Children), With<Sequence>>,
+    child: Query<&Parent>,
+    mut commands: Commands,
+) {
+    let child_id = trigger.entity();
+    let Ok(parent_id) = child.get(child_id).map(|p| p.get()) else {
+        return;
+    };
+
+    let Ok((mut state, children)) = parent.get_mut(parent_id) else {
+        return;
+    };
+
+    let last = children.last().is_some_and(|f| *f == child_id);
+
+    if state.active_events.remove(trigger.id.event) {
+        let kind = if last && trigger.kind == EndKind::End {
+            state.completed += 1;
+            EndKind::End
+        } else {
+            EndKind::Visit
+        };
+
+        commands.trigger_targets(
+            EndEvent {
+                id: trigger.id,
+                kind,
+            },
+            parent_id,
+        );
     }
 
-    commands.spawn(observer);
-
-    // spawn end observer
-    let mut observer = Observer::new(
-        move |trigger: Trigger<EndEvent>,
-              mut q: Query<&mut FragmentState>,
-              mut commands: Commands| {
-            if let Ok(mut state) = q.get_mut(id) {
-                if state.active_events.remove(trigger.id.event) {
-                    let last = last.is_some_and(|f| f == trigger.entity());
-                    let kind = if last && trigger.kind == EndKind::End {
-                        state.completed += 1;
-                        EndKind::End
-                    } else {
-                        EndKind::Visit
-                    };
-
-                    commands.trigger_targets(
-                        EndEvent {
-                            id: trigger.id,
-                            kind,
-                        },
-                        id,
-                    );
-                }
-
-                info!("observed end event! {trigger:?}");
-            }
-        },
-    );
-
-    for child in children {
-        observer.watch_entity(*child);
-    }
-
-    commands.spawn(observer);
-
-    FragmentId::new(id)
+    // info!("observed end event! {trigger:?}");
 }
 
 macro_rules! seq_frag {
@@ -481,23 +502,13 @@ macro_rules! seq_frag {
                     $($ty.into_fragment(context, commands).0),*
                 ];
 
-                spawn_sequence(&children, commands)
+                FragmentId::new(commands.spawn(Sequence).add_children(&children).id())
             }
         }
     };
 }
 
 all_tuples_with_size!(seq_frag, 0, 15, T);
-
-fn test() -> impl IntoFragment<(), String> {
-    ("Hello, world!", "How are you?")
-}
-
-impl IntoFragment<(), String> for &'static str {
-    fn into_fragment(self, context: &(), commands: &mut Commands) -> FragmentId {
-        <_ as IntoFragment<(), String>>::into_fragment(DataLeaf::new(self), context, commands)
-    }
-}
 
 /// Recursively walk the tree depth-first, building
 /// up evaluations we go.
@@ -513,8 +524,6 @@ fn descend_tree(
 
     let new_eval = *eval & evaluation;
 
-    info!("eval: {new_eval:?}, children: {children:?}");
-
     if new_eval.result.unwrap_or_default() {
         if leaf.is_some() {
             leaves.push((node, new_eval));
@@ -529,7 +538,7 @@ fn descend_tree(
 #[derive(Debug, Default, Resource)]
 pub struct SelectedFragments(pub Vec<Entity>);
 
-fn select_fragments(
+pub fn select_fragments(
     roots: Query<(Entity, &Evaluation), With<Root>>,
     fragments: Query<(&Evaluation, Option<&Children>, Option<&Leaf>)>,
     f: Query<(&Evaluation, &FragmentState)>,
@@ -545,10 +554,6 @@ fn select_fragments(
     leaves.sort_by_key(|(_, e)| e.count);
 
     selected_fragments.0.clear();
-
-    let evals: Vec<_> = f.iter().collect();
-    info!("{evals:#?}");
-    info!("leaves: {:?}", leaves);
 
     if let Some((_, eval)) = leaves.first() {
         selected_fragments.0.extend(
@@ -596,27 +601,28 @@ fn evaluate_limits(mut fragments: Query<(&mut Evaluation, &FragmentState, &Limit
     }
 }
 
-pub struct Evaluated<F, T, O, M> {
+pub struct EvaluatedWithId<F, T, O, M> {
     pub(super) fragment: F,
     pub(super) evaluation: T,
     pub(super) _marker: PhantomData<fn() -> (O, M)>,
 }
 
-struct EvalSystem(SystemId);
+#[derive(Clone, Copy)]
+struct EvalSystemId(SystemId<In<FragmentId>, Evaluation>);
 
 // Here we automatically clean up the system when this component is removed.
-impl Component for EvalSystem {
+impl Component for EvalSystemId {
     const STORAGE_TYPE: StorageType = StorageType::Table;
 
-    fn register_component_hooks(hooks: &mut bevy::ecs::component::ComponentHooks) {
+    fn register_component_hooks(hooks: &mut bevy_ecs::component::ComponentHooks) {
         hooks.on_remove(|mut world, entity, _| {
-            let eval = world.get::<EvalSystem>(entity).unwrap().0;
+            let eval = world.get::<EvalSystemId>(entity).unwrap().0;
             world.commands().unregister_system(eval);
         });
     }
 }
 
-impl<Context, Data, F, T, O, M> IntoFragment<Context, Data> for Evaluated<F, T, O, M>
+impl<Context, Data, F, T, O, M> IntoFragment<Context, Data> for EvaluatedWithId<F, T, O, M>
 where
     F: IntoFragment<Context, Data>,
     T: IntoSystem<In<FragmentId>, O, M> + 'static,
@@ -625,13 +631,63 @@ where
 {
     fn into_fragment(self, context: &Context, commands: &mut Commands) -> FragmentId {
         let id = self.fragment.into_fragment(context, commands);
-        let system = commands.register_system((move || id).pipe(self.evaluation).pipe(
-            move |input: In<O>, mut evals: Query<&mut Evaluation>| {
-                if let Ok(mut eval) = evals.get_mut(id.0) {
-                    eval.merge(input.0.evaluate());
-                }
-            },
-        ));
+        let system = commands.register_system(self.evaluation.map(|input: O| input.evaluate()));
+
+        commands.entity(id.0).insert(EvalSystemId(system));
+
+        id
+    }
+}
+
+fn custom_evals_ids(
+    systems: Query<(Entity, &EvalSystemId), With<Evaluation>>,
+    mut commands: Commands,
+) {
+    let systems: Vec<_> = systems.iter().map(|(e, s)| (e, *s)).collect();
+
+    commands.queue(|world: &mut World| {
+        for (e, system) in systems {
+            let evaluation = world
+                .run_system_with_input(system.0, FragmentId(e))
+                .unwrap();
+            let mut entity_eval = world.entity_mut(e);
+            let mut entity_eval = entity_eval.get_mut::<Evaluation>().unwrap();
+            entity_eval.merge(evaluation);
+        }
+    });
+}
+
+pub struct Evaluated<F, T, O, M> {
+    pub(super) fragment: F,
+    pub(super) evaluation: T,
+    pub(super) _marker: PhantomData<fn() -> (O, M)>,
+}
+
+#[derive(Clone, Copy)]
+struct EvalSystem(SystemId<(), Evaluation>);
+
+// Here we automatically clean up the system when this component is removed.
+impl Component for EvalSystem {
+    const STORAGE_TYPE: StorageType = StorageType::Table;
+
+    fn register_component_hooks(hooks: &mut bevy_ecs::component::ComponentHooks) {
+        hooks.on_remove(|mut world, entity, _| {
+            let eval = world.get::<EvalSystemId>(entity).unwrap().0;
+            world.commands().unregister_system(eval);
+        });
+    }
+}
+
+impl<Context, Data, F, T, O, M> IntoFragment<Context, Data> for Evaluated<F, T, O, M>
+where
+    F: IntoFragment<Context, Data>,
+    T: IntoSystem<(), O, M> + 'static,
+    O: Evaluate + 'static,
+    Data: Threaded,
+{
+    fn into_fragment(self, context: &Context, commands: &mut Commands) -> FragmentId {
+        let id = self.fragment.into_fragment(context, commands);
+        let system = commands.register_system(self.evaluation.map(|input: O| input.evaluate()));
 
         commands.entity(id.0).insert(EvalSystem(system));
 
@@ -639,8 +695,15 @@ where
     }
 }
 
-fn custom_evals(systems: Query<&EvalSystem>, mut commands: Commands) {
-    for system in systems.iter() {
-        commands.run_system(system.0);
-    }
+fn custom_evals(systems: Query<(Entity, &EvalSystem), With<Evaluation>>, mut commands: Commands) {
+    let systems: Vec<_> = systems.iter().map(|(e, s)| (e, *s)).collect();
+
+    commands.queue(|world: &mut World| {
+        for (e, system) in systems {
+            let evaluation = world.run_system(system.0).unwrap();
+            let mut entity_eval = world.entity_mut(e);
+            let mut entity_eval = entity_eval.get_mut::<Evaluation>().unwrap();
+            entity_eval.merge(evaluation);
+        }
+    });
 }

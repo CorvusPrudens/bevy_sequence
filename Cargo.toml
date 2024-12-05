@@ -4,8 +4,24 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bevy = "0.15"
+bevy_ecs = "0.15"
+bevy_app = "0.15"
+bevy_utils = "0.15"
+bevy_hierarchy = "0.15"
 rand = "0.8"
 
 [dev-dependencies]
-bevy = { version = "0.15", features = ["bevy_debug_stepping"] }
+bevy = { version = "0.15", default-features = false, features = [
+  "bevy_debug_stepping",
+  "bevy_asset",
+  "bevy_audio",
+  "bevy_color",
+  "bevy_state",
+  "multi_threaded",
+  "sysinfo_plugin",
+] }
+criterion = { version = "0.5" }
+
+[[bench]]
+name = "bench"
+harness = false

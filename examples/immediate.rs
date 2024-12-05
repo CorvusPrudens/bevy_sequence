@@ -1,7 +1,6 @@
-use std::time::Duration;
-
 use bevy::{ecs::schedule::Stepping, log::LogPlugin, prelude::*};
-use bevy_sequence::{fragment2::*, FragmentId, FragmentUpdate};
+use bevy_sequence::{fragment2::*, FragmentId};
+use std::time::Duration;
 
 fn main() {
     App::new()
@@ -16,9 +15,11 @@ fn main() {
                 //     .add_schedule(PostUpdate)
                 //     .enable();
 
-                info!("Hello, world!");
+                info!("Starting up");
 
-                spawn_root(scene(), Context, &mut commands);
+                for _ in 0..100 {
+                    spawn_root(nested(), Context, &mut commands);
+                }
             },
         )
         .insert_resource(StepTime(Timer::new(
@@ -42,7 +43,22 @@ fn scene() -> impl IntoFragment<Context, Dialogue> {
         "Crazy weather we're having, huh?",
     )
         .once()
-        .eval(|_: In<FragmentId>| true)
+        .eval(|| true)
+}
+
+fn nested() -> impl IntoFragment<Context, Dialogue> {
+    (
+        (
+            (("Hey Bob!", "Hey, Alice 1!"), ("Hey Bob!", "Hey, Alice 2!")),
+            (("Hey Bob!", "Hey, Alice 3!"), ("Hey Bob!", "Hey, Alice 4!")),
+        ),
+        (
+            (("Hey Bob!", "Hey, Alice 5!"), ("Hey Bob!", "Hey, Alice 6!")),
+            (("Hey Bob!", "Hey, Alice 7!"), ("Hey Bob!", "Hey, Alice 8!")),
+        ),
+    )
+        .once()
+        .eval(|| true)
 }
 
 impl IntoFragment<Context, Dialogue> for &'static str {
@@ -64,7 +80,7 @@ fn ping_pong(
     mut writer: EventWriter<FragmentEndEvent>,
 ) {
     for event in reader.read() {
-        println!("{}", &event.data.0);
+        // println!("{}", &event.data.0);
         writer.send(event.end());
     }
 }
