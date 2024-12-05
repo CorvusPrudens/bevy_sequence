@@ -1,5 +1,5 @@
 use bevy::{ecs::schedule::Stepping, log::LogPlugin, prelude::*};
-use bevy_sequence::{fragment::*, FragmentId};
+use bevy_sequence::prelude::*;
 use std::time::Duration;
 
 fn main() {
@@ -17,9 +17,9 @@ fn main() {
 
                 info!("Starting up");
 
-                for _ in 0..100 {
-                    spawn_root(nested(), Context, &mut commands);
-                }
+                // for _ in 0..100 {
+                spawn_root(nested(), Context, &mut commands);
+                // }
             },
         )
         .insert_resource(StepTime(Timer::new(
@@ -62,13 +62,9 @@ fn nested() -> impl IntoFragment<Context, Dialogue> {
 }
 
 impl IntoFragment<Context, Dialogue> for &'static str {
-    fn into_fragment(
-        self,
-        context: &Context,
-        commands: &mut Commands,
-    ) -> bevy_sequence::FragmentId {
+    fn into_fragment(self, context: &Context, commands: &mut Commands) -> FragmentId {
         <_ as IntoFragment<_, Dialogue>>::into_fragment(
-            DataLeaf::new(Dialogue(self.into())),
+            bevy_sequence::fragment::DataLeaf::new(Dialogue(self.into())),
             context,
             commands,
         )
@@ -80,7 +76,7 @@ fn ping_pong(
     mut writer: EventWriter<FragmentEndEvent>,
 ) {
     for event in reader.read() {
-        // println!("{}", &event.data.0);
+        println!("{}", &event.data.0);
         writer.send(event.end());
     }
 }

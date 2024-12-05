@@ -1,6 +1,6 @@
+use crate::{combinators::CombinatorPlugin, fragment, prelude::*};
 use bevy_app::prelude::*;
 use bevy_ecs::{prelude::*, schedule::ScheduleLabel};
-use bevy_utils::HashSet;
 use std::any::TypeId;
 
 /// `bevy_sequence`'s plugin.
@@ -24,20 +24,14 @@ pub enum SequenceSets {
 
 impl Plugin for SequencePlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(AddedSystems(Default::default()))
-            .insert_resource(SelectedFragments::default())
+        app.add_plugins(CombinatorPlugin)
+            .insert_resource(AddedSystems(Default::default()))
+            .insert_resource(fragment::SelectedFragments::default())
             .add_event::<FragmentEndEvent>()
             .add_systems(
                 PreUpdate,
                 (
-                    (
-                        update_sequence_items,
-                        custom_evals_ids,
-                        custom_evals,
-                        evaluate_limits,
-                    )
-                        .in_set(SequenceSets::Evaluate),
-                    select_fragments.in_set(SequenceSets::Select),
+                    crate::fragment::select_fragments.in_set(SequenceSets::Select),
                     apply_deferred
                         .after(SequenceSets::Evaluate)
                         .before(SequenceSets::Select),
@@ -46,8 +40,8 @@ impl Plugin for SequencePlugin {
             .add_systems(
                 PostUpdate,
                 (
-                    respond_to_leaf.in_set(SequenceSets::Respond),
-                    clear_evals.after(SequenceSets::Respond),
+                    crate::fragment::respond_to_leaf.in_set(SequenceSets::Respond),
+                    fragment::clear_evals.after(SequenceSets::Respond),
                 ),
             )
             .configure_sets(
@@ -56,14 +50,12 @@ impl Plugin for SequencePlugin {
                     SequenceSets::Select.after(SequenceSets::Evaluate),
                     SequenceSets::Emit.after(SequenceSets::Select),
                 ),
-            )
-            .add_observer(sequence_begin_observer)
-            .add_observer(sequence_end_observer);
+            );
     }
 }
 
 #[derive(Resource, Default)]
-struct AddedSystems(HashSet<TypeId>);
+struct AddedSystems(bevy_utils::HashSet<TypeId>);
 
 /// Insert systems into a schedule.
 ///

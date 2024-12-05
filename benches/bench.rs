@@ -1,8 +1,7 @@
 use bevy::prelude::*;
-use bevy_ecs::system::RunSystemOnce;
-use bevy_sequence::{fragment::*, FragmentId};
+use bevy_sequence::prelude::*;
 use criterion::{criterion_group, criterion_main, Criterion};
-use std::{hint::black_box, sync::atomic::AtomicBool};
+use std::hint::black_box;
 
 #[derive(Debug, Clone)]
 struct Dialogue(&'static str);
@@ -36,13 +35,9 @@ fn nested() -> impl IntoFragment<Context, Dialogue> {
 }
 
 impl IntoFragment<Context, Dialogue> for &'static str {
-    fn into_fragment(
-        self,
-        context: &Context,
-        commands: &mut Commands,
-    ) -> bevy_sequence::FragmentId {
+    fn into_fragment(self, context: &Context, commands: &mut Commands) -> FragmentId {
         <_ as IntoFragment<_, Dialogue>>::into_fragment(
-            DataLeaf::new(Dialogue(self)),
+            bevy_sequence::fragment::DataLeaf::new(Dialogue(self)),
             context,
             commands,
         )
@@ -68,20 +63,16 @@ fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| {
             let mut commands = world.commands();
 
-            for i in 0..100 {
+            for _ in 0..100 {
                 spawn_root(black_box(scene()), Context, &mut commands);
             }
 
-            drop(commands);
             world.flush();
         })
     });
 
     // Constantly evaluate sequences.
     c.bench_function("selection control", |b| {
-        let mut world = World::new();
-        let mut commands = world.commands();
-
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_systems(Update, ping_pong)
@@ -95,9 +86,6 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 
     c.bench_function("selection one", |b| {
-        let mut world = World::new();
-        let mut commands = world.commands();
-
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, SequencePlugin))
             .add_systems(Update, ping_pong)
@@ -111,9 +99,6 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 
     c.bench_function("selection thousand", |b| {
-        let mut world = World::new();
-        let mut commands = world.commands();
-
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, SequencePlugin))
             .add_systems(Update, ping_pong)
@@ -129,9 +114,6 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 
     c.bench_function("selection thousand nested", |b| {
-        let mut world = World::new();
-        let mut commands = world.commands();
-
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, SequencePlugin))
             .add_systems(Update, ping_pong)

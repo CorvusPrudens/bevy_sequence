@@ -61,7 +61,7 @@ fn emit_leaves<Data>(
             state.triggered += 1;
 
             let id = IdPair {
-                fragment: FragmentId(fragment),
+                fragment: FragmentId::new(fragment),
                 event,
             };
 
@@ -81,7 +81,7 @@ fn emit_leaves<Data>(
     }
 }
 
-fn respond_to_leaf(
+pub fn respond_to_leaf(
     mut leaves: Query<&mut FragmentState, With<Leaf>>,
     mut reader: EventReader<FragmentEndEvent>,
     mut commands: Commands,

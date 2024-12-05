@@ -34,17 +34,20 @@
 //! ```
 
 pub mod app;
+pub mod combinators;
 pub mod evaluate;
 pub mod fragment;
 
+pub use crate::app::{SequencePlugin, SequenceSets};
+
 pub mod prelude {
-    pub use crate::app::{SequencePlugin, SequenceSets};
+    pub use crate::{SequencePlugin, SequenceSets};
 
     pub use crate::evaluate::{Evaluate, Evaluation};
 
     pub use crate::fragment::{
-        EventId, Fragment, FragmentEndEvent, FragmentEvent, FragmentId, FragmentState, IdPair,
-        IntoFragment,
+        spawn_root, EventId, Fragment, FragmentEndEvent, FragmentEvent, FragmentExt, FragmentId,
+        FragmentState, IdPair, IntoFragment,
     };
 
     pub use crate::Threaded;

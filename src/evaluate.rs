@@ -1,4 +1,4 @@
-use crate::FragmentId;
+use crate::fragment::FragmentId;
 use bevy_ecs::prelude::*;
 use std::collections::{hash_map::Entry, HashMap};
 
@@ -41,7 +41,7 @@ impl<const LEN: usize> Evaluate for [bool; LEN] {
 
 impl Evaluate for Vec<bool> {
     fn evaluate(&self) -> Evaluation {
-        let result = if self.len() == 0 {
+        let result = if self.is_empty() {
             None
         } else {
             Some(self.iter().all(|e| *e))
