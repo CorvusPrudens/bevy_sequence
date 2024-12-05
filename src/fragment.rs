@@ -1,386 +1,46 @@
-use crate::{FragmentEvent, FragmentId, FragmentUpdate};
-use std::{any::TypeId, marker::PhantomData};
+#![allow(dead_code)]
 
+use crate::app::SequenceSets;
+use crate::evaluate::{Evaluate, Evaluation};
+use crate::Threaded;
 use bevy_app::prelude::*;
+use bevy_ecs::component::StorageType;
 use bevy_ecs::event::EventRegistry;
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::{ScheduleLabel, SystemSet};
+use bevy_ecs::system::SystemId;
 use bevy_hierarchy::prelude::*;
-use bevy_utils::HashSet;
+use bevy_utils::{all_tuples_with_size, HashSet};
+use std::any::TypeId;
+use std::marker::PhantomData;
 
-mod all;
-mod delay;
-mod dynamic;
-mod eval;
-mod hooks;
 mod leaf;
-mod limit;
-mod mapped;
-mod sequence;
 
-pub use delay::{run_after, Delay};
-pub use eval::Evaluated;
-pub use hooks::{OnEnd, OnEndCtx, OnStart, OnStartCtx, OnVisit, OnVisitCtx};
-pub use leaf::Leaf;
-pub use limit::Limit;
-pub use mapped::Mapped;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Component)]
+pub struct FragmentId(Entity);
 
-pub(crate) use all::update_all_items;
-pub(crate) use delay::manage_delay;
-pub(crate) use limit::update_limit_items;
-pub(crate) use sequence::update_sequence_items;
-
-use super::{evaluate::FragmentStates, EvaluateSet};
-
-/// A wrapper for typestate management.
-pub struct Unregistered<T>(T);
-
-/// A type-erased fragment component.
-#[derive(Component)]
-pub struct ErasedFragment<Context, Data>(pub Box<dyn Fragment<Context, Data> + Send + Sync>);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Start {
-    Entered,
-    Visited,
-    Unvisited,
-}
-
-impl Start {
-    pub fn entered(&self) -> bool {
-        matches!(self, Self::Entered)
-    }
-
-    /// Either Visited or Entered
-    pub fn visited(&self) -> bool {
-        matches!(self, Self::Visited | Self::Entered)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum End {
-    Exited,
-    Visited,
-    Unvisited,
-}
-
-impl End {
-    pub fn exited(&self) -> bool {
-        matches!(self, Self::Exited)
-    }
-
-    /// Either Visited or Exited
-    pub fn visited(&self) -> bool {
-        matches!(self, Self::Visited | Self::Exited)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct FragmentNode {
-    pub id: FragmentId,
-    pub children: Vec<FragmentNode>,
-}
-
-impl FragmentNode {
-    pub fn new(id: FragmentId, children: Vec<FragmentNode>) -> Self {
-        Self { id, children }
-    }
-
-    pub fn leaf(id: FragmentId) -> Self {
-        Self {
-            id,
-            children: Vec::new(),
-        }
-    }
-
-    pub fn push(&mut self, node: FragmentNode) {
-        self.children.push(node);
-    }
-
-    /// Return all the leaves starting from this node.
-    ///
-    /// If this node has no children, its ID is returned.
-    /// Otherwise, we descend this node's children to find all the leaves.
-    ///
-    /// The traversal is depth-first.
-    pub fn leaves(&self) -> Vec<FragmentId> {
-        let mut leaves = Vec::new();
-        self.leaves_recursive(&mut leaves);
-
-        leaves
-    }
-
-    fn leaves_recursive(&self, leaves: &mut Vec<FragmentId>) {
-        if self.children.is_empty() {
-            leaves.push(self.id);
-        } else {
-            for child in self.children.iter() {
-                child.leaves_recursive(leaves);
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Component)]
-pub struct FragmentTree {
-    pub tree: FragmentNode,
-    pub fragment: Entity,
-}
-
-#[derive(Component)]
-pub struct FragmentContext<T>(T);
-
-pub trait Threaded: Send + Sync + 'static {}
-
-impl<T> Threaded for T where T: Send + Sync + 'static {}
-
-/// A sequence fragment.
-///
-/// Fragments represent nodes in a sequence tree. Leaf nodes
-/// are simply text with associated IDs, but further up the
-/// tree you can have organizational nodes like [Sequence]
-/// or behavioral nodes like [Trigger] and [Evaluated].
-///
-/// This is intentionally type-eraseable. We can
-/// store top-level fragments as `Box<dyn Fragment>` in entities and
-/// call their `emit` method any time a [FragmentId] is selected.
-pub trait Fragment<Context, Data: Threaded> {
-    /// React to a leaf node being selected.
-    fn start(
-        &mut self,
-        ctx: &Context,
-        id: FragmentId,
-        state: &mut FragmentStates,
-        writer: &mut EventWriter<FragmentEvent<Data>>,
-        commands: &mut Commands,
-    ) -> Start;
-
-    /// React to a leaf node being selected.
-    fn end(
-        &mut self,
-        ctx: &Context,
-        id: FragmentId,
-        state: &mut FragmentStates,
-        commands: &mut Commands,
-    ) -> End;
-
-    /// This fragment's ID.
-    ///
-    /// This should be stable over the lifetime of the application.
-    fn id(&self) -> &FragmentId;
-}
-
-/// A convenience trait for type-erasing fragments.
-pub trait BoxedFragment<Context, Data> {
-    fn boxed(self) -> Box<dyn Fragment<Context, Data> + Send + Sync>;
-}
-
-impl<T, Context, Data> BoxedFragment<Context, Data> for T
-where
-    T: Fragment<Context, Data> + Send + Sync + 'static,
-    Data: Threaded,
-{
-    fn boxed(self) -> Box<dyn Fragment<Context, Data> + Send + Sync> {
-        Box::new(self)
-    }
-}
-
-#[derive(Resource)]
-struct ContextDataPair(HashSet<TypeId>);
-
-/// Spawn a fragment with its associated ID tree.
-pub fn spawn_fragment<Context, Data>(
-    fragment: impl Fragment<Context, Data> + Send + Sync + 'static,
-    context: Context,
-    tree: FragmentNode,
-    commands: &mut Commands,
-) where
-    Data: Threaded,
-    Context: Threaded,
-{
-    commands.queue(move |world: &mut World| {
-        if !world.contains_resource::<Events<FragmentEvent<Data>>>() {
-            EventRegistry::register_event::<FragmentEvent<Data>>(world);
-        }
-
-        // These systems should only be inserted once per `Context`, `Data` pair.
-        let id = std::any::TypeId::of::<(Context, Data)>();
-        let mut pairs = world.get_resource_or_insert_with(|| ContextDataPair(Default::default()));
-
-        if pairs.0.insert(id) {
-            let mut schedules = world.resource_mut::<Schedules>();
-            schedules.add_systems(
-                FragmentUpdate,
-                (
-                    evaluated_fragments::<Context, Data>,
-                    watch_events::<Context, Data>,
-                )
-                    .chain()
-                    .after(EvaluateSet),
-            );
-        }
-    });
-
-    let associated_frag = commands
-        .spawn((ErasedFragment(fragment.boxed()), FragmentContext(context)))
-        .id();
-    commands.spawn(FragmentTree {
-        tree,
-        fragment: associated_frag,
-    });
-}
-
-#[allow(unused)]
-pub trait SpawnFragment: Sized {
-    /// A convenience method for spawning fragments.
-    ///
-    /// Equivalent to
-    /// ```
-    ///
-    /// # fn spawn(context: u32, mut commands: Commands) {
-    /// let (fragment, tree) = self.into_fragment(context, &mut commands);
-    /// spawn_fragment(fragment, tree, &mut commands);
-    /// # }
-    /// ```
-    fn spawn_fragment<Context, Data>(self, context: Context, commands: &mut Commands)
-    where
-        Data: Threaded,
-        Context: Threaded,
-        Self: IntoFragment<Context, Data>,
-        <Self as IntoFragment<Context, Data>>::Fragment:
-            Fragment<Context, Data> + Send + Sync + 'static;
-}
-
-impl<T> SpawnFragment for T {
-    fn spawn_fragment<Context, Data>(self, context: Context, commands: &mut Commands)
-    where
-        Data: Threaded,
-        Context: Threaded,
-        Self: IntoFragment<Context, Data>,
-        <Self as IntoFragment<Context, Data>>::Fragment:
-            Fragment<Context, Data> + Send + Sync + 'static,
-    {
-        let (fragment, tree) = self.into_fragment(&context, commands);
-        spawn_fragment(fragment, context, tree, commands);
+impl FragmentId {
+    pub fn new(fragment: Entity) -> Self {
+        Self(fragment)
     }
 }
 
 pub trait IntoFragment<Context, Data: Threaded> {
-    type Fragment: Fragment<Context, Data> + Send + Sync + 'static;
+    fn into_fragment(self, context: &Context, commands: &mut Commands) -> FragmentId;
+}
 
-    fn into_fragment(
-        self,
-        context: &Context,
-        commands: &mut Commands,
-    ) -> (Self::Fragment, FragmentNode);
+pub fn spawn_root<Context: Component, Data: Threaded>(
+    fragment: impl IntoFragment<Context, Data>,
+    context: Context,
+    commands: &mut Commands,
+) {
+    let root = fragment.into_fragment(&context, commands);
+    commands.entity(root.0).insert((context, Root));
 }
 
 impl<T> FragmentExt for T {}
 
-#[allow(unused)]
 pub trait FragmentExt: Sized {
-    /// Run a system any time this fragment is visited.
-    fn on_visit<S, M>(self, system: S) -> OnVisit<Self, S::System>
-    where
-        S: IntoSystem<(), (), M>,
-    {
-        OnVisit {
-            fragment: self,
-            on_trigger: IntoSystem::into_system(system),
-        }
-    }
-
-    /// Run a system that takes the fragment context any time this fragment is visited.
-    fn on_visit_ctx<S, C, M>(self, system: S) -> OnVisitCtx<Self, S::System>
-    where
-        S: IntoSystem<In<C>, (), M>,
-        C: 'static,
-    {
-        OnVisitCtx {
-            fragment: self,
-            on_trigger: IntoSystem::into_system(system),
-        }
-    }
-
-    /// Run a system when this fragment is initially triggered.
-    fn on_start<S, M>(self, system: S) -> OnStart<Self, S::System>
-    where
-        S: IntoSystem<(), (), M>,
-    {
-        OnStart {
-            fragment: self,
-            on_trigger: IntoSystem::into_system(system),
-        }
-    }
-
-    /// Run a system that takes the fragment context when this fragment is initially triggered.
-    fn on_start_ctx<S, C, M>(self, system: S) -> OnStartCtx<Self, S::System>
-    where
-        S: IntoSystem<In<C>, (), M>,
-        C: 'static,
-    {
-        OnStartCtx {
-            fragment: self,
-            on_trigger: IntoSystem::into_system(system),
-        }
-    }
-
-    /// Run a system when this fragment is considered complete.
-    fn on_end<S, M>(self, system: S) -> OnEnd<Self, S::System>
-    where
-        S: IntoSystem<(), (), M>,
-    {
-        OnEnd {
-            fragment: self,
-            on_trigger: IntoSystem::into_system(system),
-        }
-    }
-
-    /// Run a system that takes the fragment context when this fragment is considered complete.
-    fn on_end_ctx<S, C, M>(self, system: S) -> OnEndCtx<Self, S::System>
-    where
-        S: IntoSystem<In<C>, (), M>,
-        C: 'static,
-    {
-        OnEndCtx {
-            fragment: self,
-            on_trigger: IntoSystem::into_system(system),
-        }
-    }
-
-    /// Run a system when this fragment is considered complete after the given delay.
-    fn delay<S, M>(self, duration: std::time::Duration, system: S) -> Delay<Self, S::System>
-    where
-        S: IntoSystem<(), (), M>,
-    {
-        Delay::new(self, duration, IntoSystem::into_system(system))
-    }
-
-    /// Map a fragment event.
-    fn map_event<Data, S, M>(self, event: S) -> Mapped<Self, S, M, Data>
-    where
-        M: Event,
-        S: FnMut(&FragmentEvent<Data>) -> M + Send + Sync + 'static,
-    {
-        Mapped {
-            fragment: self,
-            event,
-            _marker: PhantomData,
-        }
-    }
-
-    /// Wrap this fragment in an evaluation.
-    fn eval<S, M, O>(self, system: S) -> Evaluated<Self, Unregistered<S::System>, O>
-    where
-        S: IntoSystem<In<FragmentId>, O, M>,
-    {
-        Evaluated {
-            fragment: self,
-            evaluation: Unregistered(IntoSystem::into_system(system)),
-            _marker: PhantomData,
-        }
-    }
-
     /// Limit this fragment to `n` triggers.
     fn limit(self, n: usize) -> Limit<Self> {
         Limit::new(self, n)
@@ -391,162 +51,475 @@ pub trait FragmentExt: Sized {
         self.limit(1)
     }
 
-    /// Set a resource of type `T` with the provided value on the start of a fragment.
-    ///
-    /// This is similar to:
-    /// ```
-    /// #[derive(Resource)]
-    /// struct Resource(usize);
-    ///
-    /// "fragment".on_start(|mut resource: ResMut<Resource>| *resource = Resource(1));
-    /// ```
-    /// Except the resource is automatically inserted if it doesn't already exist.
-    fn set_resource<T>(self, value: T) -> OnStart<Self, impl System<In = (), Out = ()>>
+    /// Wrap this fragment in an evaluation.
+    fn eval<S, O, M>(self, system: S) -> Evaluated<Self, S, O, M>
     where
-        T: Resource + Clone,
+        S: IntoSystem<(), O, M> + 'static,
+        O: Evaluate + 'static,
     {
-        let system = move |world: &mut World| {
-            if !world.contains_resource::<T>() {
-                world.insert_resource(value.clone());
-            } else {
-                world.set_resource(value.clone());
+        Evaluated {
+            fragment: self,
+            evaluation: system,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Wrap this fragment in an evaluation.
+    ///
+    /// This will pass the fragment's ID to the provided systme.
+    fn eval_id<S, O, M>(self, system: S) -> EvaluatedWithId<Self, S, O, M>
+    where
+        S: IntoSystem<In<FragmentId>, O, M> + 'static,
+        O: Evaluate + 'static,
+    {
+        EvaluatedWithId {
+            fragment: self,
+            evaluation: system,
+            _marker: PhantomData,
+        }
+    }
+}
+
+/// A unique ID generated for every emitted event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EventId(u64);
+
+impl EventId {
+    pub fn new() -> Self {
+        use rand::prelude::*;
+
+        Self(rand::thread_rng().gen())
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ActiveEvents(Vec<EventId>);
+
+impl core::ops::Deref for ActiveEvents {
+    type Target = [EventId];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl ActiveEvents {
+    pub fn new(events: Vec<EventId>) -> Self {
+        Self(events)
+    }
+
+    /// Remove an ID by value.
+    ///
+    /// If the ID existed in the set and was removed,
+    /// this returns true.
+    pub fn remove(&mut self, id: EventId) -> bool {
+        if let Some(index) = self.iter().position(|e| *e == id) {
+            self.0.swap_remove(index);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn insert(&mut self, id: EventId) {
+        self.0.push(id);
+    }
+}
+
+#[derive(Debug, Component, Default, Clone, PartialEq, Eq)]
+pub struct FragmentState {
+    pub triggered: usize,
+    pub completed: usize,
+    pub active_events: ActiveEvents,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct IdPair {
+    fragment: FragmentId,
+    event: EventId,
+}
+
+#[derive(Debug, Event, Clone)]
+pub struct FragmentEvent<Data> {
+    pub id: IdPair,
+    pub data: Data,
+}
+
+impl<Data> FragmentEvent<Data> {
+    pub fn end(&self) -> FragmentEndEvent {
+        FragmentEndEvent(self.id)
+    }
+}
+
+#[derive(Debug, Event, Clone, Copy)]
+pub struct FragmentEndEvent(IdPair);
+
+/// An entity representing a sequence fragment.
+#[derive(Debug, Default, Component)]
+#[require(Evaluation, FragmentState)]
+pub struct Fragment;
+
+/// A root fragment.
+#[derive(Debug, Default, Component)]
+#[require(Fragment)]
+pub struct Root;
+
+fn clear_evals(mut evals: Query<&mut Evaluation>) {
+    for mut eval in evals.iter_mut() {
+        *eval = Default::default();
+    }
+}
+
+#[derive(Component)]
+#[require(Fragment)]
+struct Sequence;
+
+fn update_sequence_items(
+    q: Query<(&Children, &FragmentState), With<Sequence>>,
+    mut children: Query<(&mut Evaluation, &FragmentState)>,
+) {
+    for (seq, outer_state) in q.iter() {
+        let inactive = outer_state.active_events.is_empty();
+
+        // look for the first item that has finished equal to the container
+        let mut first_selected = false;
+        for child in seq.iter() {
+            let Ok((mut eval, state)) = children.get_mut(*child) else {
+                continue;
+            };
+
+            if inactive
+                && !first_selected
+                && state.active_events.is_empty()
+                && state.completed <= outer_state.completed
+            {
+                first_selected = true;
+                eval.merge(true.evaluate());
+
+                continue;
             }
+
+            eval.merge(false.evaluate());
+        }
+    }
+}
+
+#[derive(Debug, Event)]
+pub struct BeginEvent {
+    pub id: IdPair,
+    pub kind: BeginKind,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum BeginKind {
+    Start,
+    Visit,
+}
+
+#[derive(Debug, Event)]
+pub struct EndEvent {
+    pub id: IdPair,
+    pub kind: EndKind,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum EndKind {
+    End,
+    Visit,
+}
+
+fn sequence_begin_observer(
+    trigger: Trigger<BeginEvent>,
+    mut parent: Query<(&mut FragmentState, &Children), With<Sequence>>,
+    child: Query<&Parent>,
+    mut commands: Commands,
+) {
+    let child_id = trigger.entity();
+    let Ok(parent_id) = child.get(child_id).map(|p| p.get()) else {
+        return;
+    };
+
+    let Ok((mut state, children)) = parent.get_mut(parent_id) else {
+        return;
+    };
+
+    let first = children.first().is_some_and(|f| *f == child_id);
+    state.active_events.insert(trigger.id.event);
+
+    let kind = if first && trigger.kind == BeginKind::Start {
+        state.triggered += 1;
+        BeginKind::Start
+    } else {
+        BeginKind::Visit
+    };
+
+    commands.trigger_targets(
+        BeginEvent {
+            id: trigger.id,
+            kind,
+        },
+        parent_id,
+    );
+
+    // info!("observed begin event! {trigger:?}");
+}
+
+fn sequence_end_observer(
+    trigger: Trigger<EndEvent>,
+    mut parent: Query<(&mut FragmentState, &Children), With<Sequence>>,
+    child: Query<&Parent>,
+    mut commands: Commands,
+) {
+    let child_id = trigger.entity();
+    let Ok(parent_id) = child.get(child_id).map(|p| p.get()) else {
+        return;
+    };
+
+    let Ok((mut state, children)) = parent.get_mut(parent_id) else {
+        return;
+    };
+
+    let last = children.last().is_some_and(|f| *f == child_id);
+
+    if state.active_events.remove(trigger.id.event) {
+        let kind = if last && trigger.kind == EndKind::End {
+            state.completed += 1;
+            EndKind::End
+        } else {
+            EndKind::Visit
         };
 
-        OnStart {
-            fragment: self,
-            on_trigger: IntoSystem::into_system(system),
-        }
+        commands.trigger_targets(
+            EndEvent {
+                id: trigger.id,
+                kind,
+            },
+            parent_id,
+        );
     }
 
-    /// Play a sound at the start of a fragment.
-    ///
-    /// The sound will despawn after it is finished.
-    fn sound(
-        self,
-        path: impl Into<AssetPath<'static>>,
-    ) -> OnStart<Self, impl System<In = (), Out = ()>> {
-        let path = path.into();
-        OnStart {
-            fragment: self,
-            on_trigger: IntoSystem::into_system(
-                move |mut commands: Commands, asset_server: Res<AssetServer>| {
-                    commands.spawn((
-                        AudioPlayer::new(asset_server.load(&path)),
-                        PlaybackSettings::DESPAWN,
-                    ));
-                },
-            ),
-        }
-    }
-
-    /// Play a sound at the start of a fragment.
-    ///
-    /// Supply [`bevy::audio::PlaybackSettings`] for the spawned audio bundle.
-    fn sound_with(
-        self,
-        path: impl Into<AssetPath<'static>>,
-        settings: PlaybackSettings,
-    ) -> OnStart<Self, impl System<In = (), Out = ()>> {
-        let path = path.into();
-        OnStart {
-            fragment: self,
-            on_trigger: IntoSystem::into_system(
-                move |mut commands: Commands, asset_server: Res<AssetServer>| {
-                    commands.spawn((AudioPlayer::new(asset_server.load(&path)), settings));
-                },
-            ),
-        }
-    }
+    // info!("observed end event! {trigger:?}");
 }
 
+macro_rules! seq_frag {
+    ($count:literal, $($ty:ident),*) => {
+        #[allow(non_snake_case)]
+        impl<Context, Data, $($ty),*> IntoFragment<Context, Data> for ($($ty,)*)
+        where
+            Data: Threaded,
+            Context: Threaded,
+            $($ty: IntoFragment<Context, Data>),*
+        {
+            #[allow(unused)]
+            fn into_fragment(self, context: &Context, commands: &mut Commands) -> FragmentId {
+                let ($($ty,)*) = self;
+
+                let children: [_; $count] = [
+                    $($ty.into_fragment(context, commands).0),*
+                ];
+
+                FragmentId::new(commands.spawn(Sequence).add_children(&children).id())
+            }
+        }
+    };
+}
+
+all_tuples_with_size!(seq_frag, 0, 15, T);
+
+/// Recursively walk the tree depth-first, building
+/// up evaluations we go.
 fn descend_tree(
-    node: &FragmentNode,
-    fragment: Entity,
-    evaluations: &mut super::evaluate::EvaluatedFragments,
-    leaves: &mut Vec<(FragmentId, Entity)>,
+    node: Entity,
+    evaluation: Evaluation,
+    fragments: &Query<(&Evaluation, Option<&Children>, Option<&Leaf>)>,
+    leaves: &mut Vec<(Entity, Evaluation)>,
 ) {
-    if node.children.is_empty() {
-        leaves.push((node.id, fragment));
-    } else {
-        for child in node.children.iter() {
-            // push the parent eval, if any
-            if let Some(eval) = evaluations.evaluations.get(&node.id).copied() {
-                evaluations.insert(child.id, eval);
-            }
+    let Ok((eval, children, leaf)) = fragments.get(node) else {
+        return;
+    };
 
-            if evaluations.is_candidate(child.id) {
-                descend_tree(child, fragment, evaluations, leaves);
+    let new_eval = *eval & evaluation;
+
+    if new_eval.result.unwrap_or_default() {
+        if leaf.is_some() {
+            leaves.push((node, new_eval));
+        } else {
+            for child in children.iter().flat_map(|c| c.iter()) {
+                descend_tree(*child, new_eval, fragments, leaves);
             }
         }
     }
 }
 
-// TODO: update so this is inserted for every unique event type.
-fn evaluated_fragments<Context, Data: Threaded>(
-    mut fragments: Query<(
-        &mut ErasedFragment<Context, Data>,
-        &FragmentContext<Context>,
-    )>,
-    trees: Query<&FragmentTree>,
-    mut writer: EventWriter<FragmentEvent<Data>>,
-    mut evaluated_fragments: ResMut<super::evaluate::EvaluatedFragments>,
-    mut state: ResMut<FragmentStates>,
-    mut commands: Commands,
-) where
-    Context: Sync + Send + 'static,
-{
+#[derive(Debug, Default, Resource)]
+pub struct SelectedFragments(pub Vec<Entity>);
+
+pub fn select_fragments(
+    roots: Query<(Entity, &Evaluation), With<Root>>,
+    fragments: Query<(&Evaluation, Option<&Children>, Option<&Leaf>)>,
+    f: Query<(&Evaluation, &FragmentState)>,
+    mut selected_fragments: ResMut<SelectedFragments>,
+) {
     // traverse trees to build up full evaluatinos
     let mut leaves = Vec::new();
-    for FragmentTree { tree, fragment } in trees.iter() {
-        descend_tree(tree, *fragment, &mut evaluated_fragments, &mut leaves);
+
+    for (root, eval) in roots.iter() {
+        descend_tree(root, *eval, &fragments, &mut leaves);
     }
 
-    let mut evaluations: Vec<_> = leaves
-        .iter()
-        .flat_map(|(id, frag)| {
-            evaluated_fragments
-                .evaluations
-                .get(id)
-                .map(|e| (id, *frag, e))
-        })
-        .filter(|(id, _, e)| e.result.unwrap_or_default() && !state.is_active(**id))
-        .collect();
-    evaluations.sort_by_key(|(_, _, e)| e.count);
+    leaves.sort_by_key(|(_, e)| e.count);
 
-    if let Some((_, _, eval)) = evaluations.first() {
-        let selections = evaluations.iter().take_while(|e| e.2.count == eval.count);
+    selected_fragments.0.clear();
 
-        for (id, fragment, e) in selections {
-            if let Ok((mut fragment, ctx)) = fragments.get_mut(*fragment) {
-                fragment
-                    .0
-                    .as_mut()
-                    .start(&ctx.0, **id, &mut state, &mut writer, &mut commands);
-            }
-        }
+    if let Some((_, eval)) = leaves.first() {
+        selected_fragments.0.extend(
+            leaves
+                .iter()
+                .take_while(|e| e.1.count == eval.count)
+                .map(|(e, _)| *e),
+        );
     }
-
-    evaluated_fragments.clear();
 }
 
-fn watch_events<Context, Data: Threaded>(
-    mut fragments: Query<(
-        &mut ErasedFragment<Context, Data>,
-        &FragmentContext<Context>,
-    )>,
-    mut end: EventReader<super::FragmentEndEvent>,
-    mut state: ResMut<FragmentStates>,
-    mut commands: Commands,
-) where
-    Context: Sync + Send + 'static,
+/// A wrapper fragment that limits its children to a certain number of executions.
+pub struct Limit<T> {
+    fragment: T,
+    limit: usize,
+}
+
+impl<T> Limit<T> {
+    pub fn new(fragment: T, limit: usize) -> Self {
+        Self { fragment, limit }
+    }
+}
+
+#[derive(Debug, Component)]
+pub struct LimitItem(usize);
+
+impl<T, C, D> IntoFragment<C, D> for Limit<T>
+where
+    T: IntoFragment<C, D>,
+    D: Threaded,
 {
-    for end in end.read() {
-        for (mut fragment, ctx) in fragments.iter_mut() {
-            fragment
-                .0
-                .as_mut()
-                .end(&ctx.0, end.id, &mut state, &mut commands);
+    fn into_fragment(self, context: &C, commands: &mut Commands) -> FragmentId {
+        let id = self.fragment.into_fragment(context, commands);
+        commands.entity(id.0).insert(LimitItem(self.limit));
+
+        id
+    }
+}
+
+fn evaluate_limits(mut fragments: Query<(&mut Evaluation, &FragmentState, &LimitItem)>) {
+    for (mut eval, state, limit) in fragments.iter_mut() {
+        if state.completed >= limit.0 {
+            eval.merge(false.evaluate());
         }
     }
+}
+
+pub struct EvaluatedWithId<F, T, O, M> {
+    pub(super) fragment: F,
+    pub(super) evaluation: T,
+    pub(super) _marker: PhantomData<fn() -> (O, M)>,
+}
+
+#[derive(Clone, Copy)]
+struct EvalSystemId(SystemId<In<FragmentId>, Evaluation>);
+
+// Here we automatically clean up the system when this component is removed.
+impl Component for EvalSystemId {
+    const STORAGE_TYPE: StorageType = StorageType::Table;
+
+    fn register_component_hooks(hooks: &mut bevy_ecs::component::ComponentHooks) {
+        hooks.on_remove(|mut world, entity, _| {
+            let eval = world.get::<EvalSystemId>(entity).unwrap().0;
+            world.commands().unregister_system(eval);
+        });
+    }
+}
+
+impl<Context, Data, F, T, O, M> IntoFragment<Context, Data> for EvaluatedWithId<F, T, O, M>
+where
+    F: IntoFragment<Context, Data>,
+    T: IntoSystem<In<FragmentId>, O, M> + 'static,
+    O: Evaluate + 'static,
+    Data: Threaded,
+{
+    fn into_fragment(self, context: &Context, commands: &mut Commands) -> FragmentId {
+        let id = self.fragment.into_fragment(context, commands);
+        let system = commands.register_system(self.evaluation.map(|input: O| input.evaluate()));
+
+        commands.entity(id.0).insert(EvalSystemId(system));
+
+        id
+    }
+}
+
+fn custom_evals_ids(
+    systems: Query<(Entity, &EvalSystemId), With<Evaluation>>,
+    mut commands: Commands,
+) {
+    let systems: Vec<_> = systems.iter().map(|(e, s)| (e, *s)).collect();
+
+    commands.queue(|world: &mut World| {
+        for (e, system) in systems {
+            let evaluation = world
+                .run_system_with_input(system.0, FragmentId(e))
+                .unwrap();
+            let mut entity_eval = world.entity_mut(e);
+            let mut entity_eval = entity_eval.get_mut::<Evaluation>().unwrap();
+            entity_eval.merge(evaluation);
+        }
+    });
+}
+
+pub struct Evaluated<F, T, O, M> {
+    pub(super) fragment: F,
+    pub(super) evaluation: T,
+    pub(super) _marker: PhantomData<fn() -> (O, M)>,
+}
+
+#[derive(Clone, Copy)]
+struct EvalSystem(SystemId<(), Evaluation>);
+
+// Here we automatically clean up the system when this component is removed.
+impl Component for EvalSystem {
+    const STORAGE_TYPE: StorageType = StorageType::Table;
+
+    fn register_component_hooks(hooks: &mut bevy_ecs::component::ComponentHooks) {
+        hooks.on_remove(|mut world, entity, _| {
+            let eval = world.get::<EvalSystemId>(entity).unwrap().0;
+            world.commands().unregister_system(eval);
+        });
+    }
+}
+
+impl<Context, Data, F, T, O, M> IntoFragment<Context, Data> for Evaluated<F, T, O, M>
+where
+    F: IntoFragment<Context, Data>,
+    T: IntoSystem<(), O, M> + 'static,
+    O: Evaluate + 'static,
+    Data: Threaded,
+{
+    fn into_fragment(self, context: &Context, commands: &mut Commands) -> FragmentId {
+        let id = self.fragment.into_fragment(context, commands);
+        let system = commands.register_system(self.evaluation.map(|input: O| input.evaluate()));
+
+        commands.entity(id.0).insert(EvalSystem(system));
+
+        id
+    }
+}
+
+fn custom_evals(systems: Query<(Entity, &EvalSystem), With<Evaluation>>, mut commands: Commands) {
+    let systems: Vec<_> = systems.iter().map(|(e, s)| (e, *s)).collect();
+
+    commands.queue(|world: &mut World| {
+        for (e, system) in systems {
+            let evaluation = world.run_system(system.0).unwrap();
+            let mut entity_eval = world.entity_mut(e);
+            let mut entity_eval = entity_eval.get_mut::<Evaluation>().unwrap();
+            entity_eval.merge(evaluation);
+        }
+    });
 }

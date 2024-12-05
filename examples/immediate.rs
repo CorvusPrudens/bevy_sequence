@@ -1,5 +1,5 @@
 use bevy::{ecs::schedule::Stepping, log::LogPlugin, prelude::*};
-use bevy_sequence::{fragment2::*, FragmentId};
+use bevy_sequence::{fragment::*, FragmentId};
 use std::time::Duration;
 
 fn main() {

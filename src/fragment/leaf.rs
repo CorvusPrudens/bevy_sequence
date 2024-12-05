@@ -1,68 +1,104 @@
-use super::{End, Fragment, FragmentNode, FragmentStates, Start, Threaded};
-use crate::{FragmentEvent, FragmentId};
-use bevy::prelude::*;
+use crate::app::SequenceSets;
+use crate::fragment::{BeginEvent, BeginKind, EndEvent, EndKind, SelectedFragments};
+use crate::prelude::*;
+use bevy_ecs::event::EventRegistry;
+use bevy_ecs::prelude::*;
 
-pub struct Leaf<T> {
-    leaf: T,
-    id: FragmentId,
-}
+/// A leaf fragment.
+///
+/// Leaf fragments are nodes that emit [FragmentEvent]s.
+#[derive(Debug, Default, Component)]
+#[require(Fragment)]
+pub struct Leaf;
 
-impl<T> Leaf<T> {
-    pub fn new(value: T) -> (Self, FragmentNode) {
-        let id = todo!();
+/// A leaf node that simply emits its contained value.
+#[derive(Debug, Component)]
+#[require(Leaf)]
+pub struct DataLeaf<T>(T);
 
-        (Leaf { leaf: value, id }, FragmentNode::leaf(id))
+impl<T> DataLeaf<T> {
+    pub fn new(value: T) -> Self {
+        Self(value)
     }
 }
 
-impl<Context, T, Data> Fragment<Context, Data> for Leaf<T>
+impl<T, Context, Data: Threaded> IntoFragment<Context, Data> for DataLeaf<T>
 where
-    Data: Threaded + From<T>,
-    T: Clone,
+    Data: From<T> + Clone,
 {
-    fn start(
-        &mut self,
-        _: &Context,
-        id: FragmentId,
-        state: &mut FragmentStates,
-        writer: &mut EventWriter<FragmentEvent<Data>>,
-        _commands: &mut Commands,
-    ) -> Start {
-        if id == self.id {
-            writer.send(FragmentEvent {
-                data: self.leaf.clone().into(),
-                id: self.id,
-            });
+    fn into_fragment(self, _: &Context, commands: &mut Commands) -> FragmentId {
+        commands.queue(|world: &mut World| {
+            crate::app::add_systems_checked(
+                world,
+                bevy_app::prelude::PreUpdate,
+                emit_leaves::<Data>.in_set(SequenceSets::Emit),
+            );
 
-            let state = state.update(id);
+            if !world.contains_resource::<Events<FragmentEvent<Data>>>() {
+                EventRegistry::register_event::<FragmentEvent<Data>>(world);
+            }
+        });
+
+        let entity = commands.spawn(DataLeaf::<Data>(self.0.into()));
+
+        FragmentId::new(entity.id())
+    }
+}
+
+fn emit_leaves<Data>(
+    mut leaves: Query<(&DataLeaf<Data>, &mut FragmentState)>,
+    mut writer: EventWriter<FragmentEvent<Data>>,
+    selected_fragments: Res<SelectedFragments>,
+    mut commands: Commands,
+) where
+    Data: Threaded + Clone,
+{
+    for fragment in selected_fragments.0.iter().copied() {
+        if let Ok((leaf, mut state)) = leaves.get_mut(fragment) {
+            let event = EventId::new();
+
+            state.active_events.insert(event);
             state.triggered += 1;
-            state.active = true;
 
-            Start::Entered
-        } else {
-            Start::Unvisited
+            let id = IdPair {
+                fragment: FragmentId(fragment),
+                event,
+            };
+
+            commands.trigger_targets(
+                BeginEvent {
+                    id,
+                    kind: BeginKind::Start,
+                },
+                fragment,
+            );
+
+            writer.send(FragmentEvent {
+                id,
+                data: leaf.0.clone(),
+            });
         }
     }
+}
 
-    fn end(
-        &mut self,
-        _: &Context,
-        id: FragmentId,
-        state: &mut FragmentStates,
-        _commands: &mut Commands,
-    ) -> End {
-        if id == self.id {
-            let state = state.update(id);
-            state.completed += 1;
-            state.active = false;
+fn respond_to_leaf(
+    mut leaves: Query<&mut FragmentState, With<Leaf>>,
+    mut reader: EventReader<FragmentEndEvent>,
+    mut commands: Commands,
+) {
+    for event in reader.read() {
+        if let Ok(mut state) = leaves.get_mut(event.0.fragment.0) {
+            if state.active_events.remove(event.0.event) {
+                state.completed += 1;
 
-            End::Exited
-        } else {
-            End::Unvisited
+                commands.trigger_targets(
+                    EndEvent {
+                        id: event.0,
+                        kind: EndKind::End,
+                    },
+                    event.0.fragment.0,
+                );
+            }
         }
-    }
-
-    fn id(&self) -> &FragmentId {
-        &self.id
     }
 }

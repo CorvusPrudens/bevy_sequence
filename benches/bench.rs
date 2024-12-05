@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_ecs::system::RunSystemOnce;
-use bevy_sequence::{fragment2::*, FragmentId};
+use bevy_sequence::{fragment::*, FragmentId};
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::{hint::black_box, sync::atomic::AtomicBool};
 
