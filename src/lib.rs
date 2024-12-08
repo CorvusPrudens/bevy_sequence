@@ -1,35 +1,51 @@
 //! A concise, expressive event sequencing library for Bevy.
 //!
-//! `bevy_sequence` is _concise_ because you can define
+//! `bevy_sequence` is concise because you can define
 //! sequences with minimal syntax.
 //!
 //! ```
-//! fn sequence<C, D>() -> impl IntoFragment<C, D> {
-//!     (
-//!         "Hello, Alice!",
-//!         "Hey Bob...",
-//!         "Mighty fine weather we're having, eh?",
-//!     )
-//! }
+//! (
+//!     "Hello, Alice!",
+//!     "Hey Bob...",
+//!     "Mighty fine weather we're having, eh?",
+//! )
 //! ```
 //!
-//! `bevy_sequence` is _expressive_ because of its
+//! It's also expressive because of its
 //! rich set of combinators.
 //!
 //! ```
-//! # fn rand_float() -> f32 { 4. }
-//! fn sequence<C, D>() -> impl IntoFragment<C, D> {
-//!     (
-//!         "Hello, Alice!",
-//!         any((
-//!             "Hey Bob...",
-//!             "Aren't you supposed to be working?".eval(|res: Res<Branch>| res.0 < 0.25),
-//!         ))
-//!         .on_start(|res: ResMut<Branch>| res.0 = rand_float()),
-//!         "Mighty fine weather we're having, eh?",
-//!     )
+//! (
+//!     // Play a sound
+//!     "Hello, Alice!".sound("hello.ogg"),
+//!     // Randomly select a fragment.
+//!     choice((
+//!         "Hey Bob...",
+//!         "Aren't you supposed to be working, Bob?",
+//!     )),
+//!     // Compute the value when this fragment is reached
+//!     compute(|res: Res<Temperature>| {
+//!         format!("{res} degrees, huh? Mighty fine weather!")
+//!     }),
+//! )
+//!     // Run this sequence to completion just once.
 //!     .once()
-//!     .set_resource(ConversationStarted(true))
+//! ```
+//!
+//! With a little setup, sequences of heterogenous types know
+//! how to spawn themselves.
+//!
+//! ```
+//! struct MyData(Cow<'static, str>);
+//!
+//! fn system(mut commands: Commands) {
+//!     let sequence = (
+//!         "Hello, Alice!",
+//!         compute(|res: Res<PlayerName>| format!("Hey, {res}...")),
+//!         "Mighty fine weather we're having, eh?",
+//!     );
+//!
+//!     spawn_sequence::<MyData>(sequence, &mut commands);
 //! }
 //! ```
 
@@ -46,9 +62,12 @@ pub mod prelude {
     pub use crate::evaluate::{Evaluate, Evaluation};
 
     pub use crate::fragment::{
-        spawn_root, EventId, Fragment, FragmentEndEvent, FragmentEvent, FragmentExt, FragmentId,
-        FragmentState, IdPair, IntoFragment,
+        spawn_root, Fragment, FragmentExt, FragmentId, FragmentState, IntoFragment,
     };
+
+    pub use crate::fragment::event::{EventId, FragmentEndEvent, FragmentEvent, IdPair};
+
+    pub use crate::combinators::select::select;
 
     pub use crate::Threaded;
 }

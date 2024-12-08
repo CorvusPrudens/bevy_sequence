@@ -2,7 +2,7 @@ use crate::prelude::*;
 use bevy_ecs::prelude::*;
 
 // Update the trait to remove the const generic and return an iterator
-pub trait IntoChildren<Context, Data: Threaded> {
+pub trait IntoChildren<Data: Threaded, Context = ()> {
     type Collection: AsRef<[Entity]>;
 
     fn into_children(self, context: &Context, commands: &mut Commands) -> Self::Collection;
@@ -11,13 +11,14 @@ pub trait IntoChildren<Context, Data: Threaded> {
 macro_rules! children_frag {
     ($count:literal, $($name:ident),*) => {
         #[allow(non_snake_case, unused_variables)]
-        impl<Context, Data, $($name),*> IntoChildren<Context, Data> for ($($name,)*)
+        impl<Data, Context, $($name),*> IntoChildren<Data, Context> for ($($name,)*)
         where
             Data: Threaded,
-            Context: Threaded,
-            $($name: IntoFragment<Context, Data>),*
+            $($name: IntoFragment<Data, Context>),*
         {
-            fn into_children(self, context: &Context, commands: &mut Commands) -> impl AsRef<[Entity]> {
+            type Collection = [Entity; $count];
+
+            fn into_children(self, context: &Context, commands: &mut Commands) -> Self::Collection {
                 let ($($name,)*) = self;
                 let entities: [Entity; $count] = [$($name.into_fragment(context, commands).entity()),*];
                 entities
@@ -30,13 +31,14 @@ bevy_utils::all_tuples_with_size!(children_frag, 0, 15, T);
 
 // Update the `IntoChildren` trait to support arrays and vectors.
 // For arrays (with a const generic length) and for vectors of fragments.
-impl<Context, Data, T, const N: usize> IntoChildren<Context, Data> for [T; N]
+impl<Context, Data, T, const N: usize> IntoChildren<Data, Context> for [T; N]
 where
     Data: Threaded,
-    Context: Threaded,
-    T: IntoFragment<Context, Data>,
+    T: IntoFragment<Data, Context>,
 {
-    fn into_children(self, context: &Context, commands: &mut Commands) -> impl AsRef<[Entity]> {
+    type Collection = [Entity; N];
+
+    fn into_children(self, context: &Context, commands: &mut Commands) -> Self::Collection {
         let mut entities = self.into_iter();
         let entities: [_; N] = std::array::from_fn(|_| {
             entities
@@ -50,13 +52,14 @@ where
     }
 }
 
-impl<Context, Data, T> IntoChildren<Context, Data> for Vec<T>
+impl<Data, Context, T> IntoChildren<Data, Context> for Vec<T>
 where
     Data: Threaded,
-    Context: Threaded,
-    T: IntoFragment<Context, Data>,
+    T: IntoFragment<Data, Context>,
 {
-    fn into_children(self, context: &Context, commands: &mut Commands) -> impl AsRef<[Entity]> {
+    type Collection = Vec<Entity>;
+
+    fn into_children(self, context: &Context, commands: &mut Commands) -> Self::Collection {
         let entities: Vec<Entity> = self
             .into_iter()
             .map(|f| f.into_fragment(context, commands).entity())

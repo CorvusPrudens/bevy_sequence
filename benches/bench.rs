@@ -6,10 +6,7 @@ use std::hint::black_box;
 #[derive(Debug, Clone)]
 struct Dialogue(&'static str);
 
-#[derive(Component)]
-struct Context;
-
-fn scene() -> impl IntoFragment<Context, Dialogue> {
+fn scene() -> impl IntoFragment<Dialogue> {
     (
         ("Hello, Alice!", "hey"),
         "Hey Bob...",
@@ -20,7 +17,7 @@ fn scene() -> impl IntoFragment<Context, Dialogue> {
         .eval(|| true)
 }
 
-fn nested() -> impl IntoFragment<Context, Dialogue> {
+fn nested() -> impl IntoFragment<Dialogue> {
     (
         (
             (("Hey Bob!", "Hey, Alice 1!"), ("Hey Bob!", "Hey, Alice 2!")),
@@ -34,9 +31,9 @@ fn nested() -> impl IntoFragment<Context, Dialogue> {
         .eval(|| true)
 }
 
-impl IntoFragment<Context, Dialogue> for &'static str {
-    fn into_fragment(self, context: &Context, commands: &mut Commands) -> FragmentId {
-        <_ as IntoFragment<_, Dialogue>>::into_fragment(
+impl IntoFragment<Dialogue> for &'static str {
+    fn into_fragment(self, context: &(), commands: &mut Commands) -> FragmentId {
+        <_ as IntoFragment<Dialogue>>::into_fragment(
             bevy_sequence::fragment::DataLeaf::new(Dialogue(self)),
             context,
             commands,
@@ -64,7 +61,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             let mut commands = world.commands();
 
             for _ in 0..100 {
-                spawn_root(black_box(scene()), Context, &mut commands);
+                spawn_root(black_box(scene()), &mut commands);
             }
 
             world.flush();
@@ -77,7 +74,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         app.add_plugins(MinimalPlugins)
             .add_systems(Update, ping_pong)
             .add_systems(Startup, |mut commands: Commands| {
-                spawn_root(scene(), Context, &mut commands);
+                spawn_root(scene(), &mut commands);
             });
 
         b.iter(|| {
@@ -90,7 +87,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         app.add_plugins((MinimalPlugins, SequencePlugin))
             .add_systems(Update, ping_pong)
             .add_systems(Startup, |mut commands: Commands| {
-                spawn_root(scene(), Context, &mut commands);
+                spawn_root(scene(), &mut commands);
             });
 
         b.iter(|| {
@@ -104,7 +101,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             .add_systems(Update, ping_pong)
             .add_systems(Startup, |mut commands: Commands| {
                 for _ in 0..1000 {
-                    spawn_root(scene(), Context, &mut commands);
+                    spawn_root(scene(), &mut commands);
                 }
             });
 
@@ -119,7 +116,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             .add_systems(Update, ping_pong)
             .add_systems(Startup, |mut commands: Commands| {
                 for _ in 0..1000 {
-                    spawn_root(nested(), Context, &mut commands);
+                    spawn_root(nested(), &mut commands);
                 }
             });
 

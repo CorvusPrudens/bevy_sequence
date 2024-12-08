@@ -35,9 +35,9 @@ impl Component for EvalSystemId {
     }
 }
 
-impl<Context, Data, F, T, O, M> IntoFragment<Context, Data> for EvaluatedWithId<F, T, O, M>
+impl<Context, Data, F, T, O, M> IntoFragment<Data, Context> for EvaluatedWithId<F, T, O, M>
 where
-    F: IntoFragment<Context, Data>,
+    F: IntoFragment<Data, Context>,
     T: IntoSystem<In<FragmentId>, O, M> + 'static,
     O: Evaluate + 'static,
     Data: Threaded,
@@ -101,9 +101,9 @@ impl Component for EvalSystem {
     }
 }
 
-impl<Context, Data, F, T, O, M> IntoFragment<Context, Data> for Evaluated<F, T, O, M>
+impl<Context, Data, F, T, O, M> IntoFragment<Data, Context> for Evaluated<F, T, O, M>
 where
-    F: IntoFragment<Context, Data>,
+    F: IntoFragment<Data, Context>,
     T: IntoSystem<(), O, M> + 'static,
     O: Evaluate + 'static,
     Data: Threaded,

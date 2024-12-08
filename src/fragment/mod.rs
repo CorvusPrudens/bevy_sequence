@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::combinators;
 use crate::evaluate::{Evaluate, Evaluation};
 use crate::Threaded;
@@ -7,9 +5,9 @@ use bevy_ecs::prelude::*;
 use bevy_hierarchy::prelude::*;
 
 pub mod children;
+pub mod event;
 mod leaf;
 
-pub(crate) use leaf::respond_to_leaf;
 pub use leaf::{DataLeaf, Leaf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Component)]
@@ -25,17 +23,22 @@ impl FragmentId {
     }
 }
 
-pub trait IntoFragment<Context, Data: Threaded> {
+pub trait IntoFragment<Data: Threaded, Context = ()> {
     fn into_fragment(self, context: &Context, commands: &mut Commands) -> FragmentId;
 }
 
-pub fn spawn_root<Context: Component, Data: Threaded>(
-    fragment: impl IntoFragment<Context, Data>,
+pub fn spawn_root<Data: Threaded>(fragment: impl IntoFragment<Data>, commands: &mut Commands) {
+    let root = fragment.into_fragment(&(), commands);
+    commands.entity(root.0).insert(Root);
+}
+
+pub fn spawn_root_with_context<Data: Threaded, Context: Component>(
+    fragment: impl IntoFragment<Data, Context>,
     context: Context,
     commands: &mut Commands,
 ) {
     let root = fragment.into_fragment(&context, commands);
-    commands.entity(root.0).insert((context, Root));
+    commands.entity(root.0).insert((Root, context));
 }
 
 impl<T> FragmentExt for T {}
@@ -72,93 +75,20 @@ pub trait FragmentExt: Sized {
     }
 }
 
-/// A unique ID generated for every emitted event.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct EventId(u64);
-
-impl EventId {
-    pub fn new() -> Self {
-        use rand::prelude::*;
-
-        Self(rand::thread_rng().gen())
-    }
-}
-
-impl Default for EventId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct ActiveEvents(Vec<EventId>);
-
-impl core::ops::Deref for ActiveEvents {
-    type Target = [EventId];
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl ActiveEvents {
-    pub fn new(events: Vec<EventId>) -> Self {
-        Self(events)
-    }
-
-    /// Remove an ID by value.
-    ///
-    /// If the ID existed in the set and was removed,
-    /// this returns true.
-    pub fn remove(&mut self, id: EventId) -> bool {
-        if let Some(index) = self.iter().position(|e| *e == id) {
-            self.0.swap_remove(index);
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn insert(&mut self, id: EventId) {
-        self.0.push(id);
-    }
-}
-
 #[derive(Debug, Component, Default, Clone, PartialEq, Eq)]
 pub struct FragmentState {
     pub triggered: usize,
     pub completed: usize,
-    pub active_events: ActiveEvents,
+    pub active_events: event::ActiveEvents,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct IdPair {
-    pub fragment: FragmentId,
-    pub event: EventId,
-}
-
-#[derive(Debug, Event, Clone)]
-pub struct FragmentEvent<Data> {
-    pub id: IdPair,
-    pub data: Data,
-}
-
-impl<Data> FragmentEvent<Data> {
-    pub fn end(&self) -> FragmentEndEvent {
-        FragmentEndEvent(self.id)
-    }
-}
-
-#[derive(Debug, Event, Clone, Copy)]
-pub struct FragmentEndEvent(IdPair);
 
 /// An entity representing a sequence fragment.
 #[derive(Debug, Default, Component)]
-#[require(Evaluation, FragmentState)]
+#[require(Evaluation, FragmentState, event::EventPath)]
 pub struct Fragment;
 
 /// A root fragment.
-#[derive(Debug, Default, Component)]
+#[derive(Debug, Default, Component, Clone)]
 #[require(Fragment)]
 pub struct Root;
 
@@ -166,30 +96,6 @@ pub(crate) fn clear_evals(mut evals: Query<&mut Evaluation>) {
     for mut eval in evals.iter_mut() {
         *eval = Default::default();
     }
-}
-
-#[derive(Debug, Event)]
-pub struct BeginEvent {
-    pub id: IdPair,
-    pub kind: BeginKind,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum BeginKind {
-    Start,
-    Visit,
-}
-
-#[derive(Debug, Event)]
-pub struct EndEvent {
-    pub id: IdPair,
-    pub kind: EndKind,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum EndKind {
-    End,
-    Visit,
 }
 
 /// Recursively walk the tree depth-first, building

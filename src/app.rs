@@ -1,4 +1,11 @@
-use crate::{combinators::CombinatorPlugin, fragment, prelude::*};
+use crate::{
+    combinators::CombinatorPlugin,
+    fragment::{
+        self,
+        event::{BeginStage, EndStage, MapFn, OnBeginDown, OnBeginUp, OnEndDown, OnEndUp},
+    },
+    prelude::*,
+};
 use bevy_app::prelude::*;
 use bevy_ecs::{prelude::*, schedule::ScheduleLabel};
 use std::any::TypeId;
@@ -24,6 +31,14 @@ pub enum SequenceSets {
 
 impl Plugin for SequencePlugin {
     fn build(&self, app: &mut App) {
+        let world = app.world_mut();
+        world.register_component::<OnBeginUp>();
+        world.register_component::<OnBeginDown>();
+        world.register_component::<OnEndUp>();
+        world.register_component::<OnEndDown>();
+        world.register_component::<MapFn<BeginStage>>();
+        world.register_component::<MapFn<EndStage>>();
+
         app.add_plugins(CombinatorPlugin)
             .insert_resource(AddedSystems(Default::default()))
             .insert_resource(fragment::SelectedFragments::default())
@@ -35,12 +50,14 @@ impl Plugin for SequencePlugin {
                     apply_deferred
                         .after(SequenceSets::Evaluate)
                         .before(SequenceSets::Select),
+                    crate::fragment::event::begin_world.in_set(SequenceSets::Emit),
                 ),
             )
             .add_systems(
                 PostUpdate,
                 (
-                    crate::fragment::respond_to_leaf.in_set(SequenceSets::Respond),
+                    crate::fragment::event::end_world.in_set(SequenceSets::Respond),
+                    // crate::fragment::respond_to_leaf.in_set(SequenceSets::Respond),
                     fragment::clear_evals.after(SequenceSets::Respond),
                 ),
             )
@@ -51,6 +68,9 @@ impl Plugin for SequencePlugin {
                     SequenceSets::Emit.after(SequenceSets::Select),
                 ),
             );
+
+        // .add_observer(crate::fragment::event::end_up)
+        // .add_observer(crate::fragment::event::begin_up);
     }
 }
 

@@ -17,9 +17,9 @@ fn main() {
 
                 info!("Starting up");
 
-                // for _ in 0..100 {
-                spawn_root(nested(), Context, &mut commands);
-                // }
+                for _ in 0..1000 {
+                    spawn_root(scene(), &mut commands);
+                }
             },
         )
         .insert_resource(StepTime(Timer::new(
@@ -33,20 +33,16 @@ fn main() {
 #[derive(Debug, Clone)]
 struct Dialogue(String);
 
-#[derive(Component)]
-struct Context;
-
-fn scene() -> impl IntoFragment<Context, Dialogue> {
+fn scene() -> impl IntoFragment<Dialogue> {
     (
         ("Hello, Alice!", "hey"),
         "Hey Bob...",
         "Crazy weather we're having, huh?",
     )
-        .once()
         .eval(|| true)
 }
 
-fn nested() -> impl IntoFragment<Context, Dialogue> {
+fn nested() -> impl IntoFragment<Dialogue> {
     (
         (
             (("Hey Bob!", "Hey, Alice 1!"), ("Hey Bob!", "Hey, Alice 2!")),
@@ -57,13 +53,12 @@ fn nested() -> impl IntoFragment<Context, Dialogue> {
             (("Hey Bob!", "Hey, Alice 7!"), ("Hey Bob!", "Hey, Alice 8!")),
         ),
     )
-        .once()
         .eval(|| true)
 }
 
-impl IntoFragment<Context, Dialogue> for &'static str {
-    fn into_fragment(self, context: &Context, commands: &mut Commands) -> FragmentId {
-        <_ as IntoFragment<_, Dialogue>>::into_fragment(
+impl IntoFragment<Dialogue> for &'static str {
+    fn into_fragment(self, context: &(), commands: &mut Commands) -> FragmentId {
+        <_ as IntoFragment<Dialogue>>::into_fragment(
             bevy_sequence::fragment::DataLeaf::new(Dialogue(self.into())),
             context,
             commands,
@@ -76,7 +71,7 @@ fn ping_pong(
     mut writer: EventWriter<FragmentEndEvent>,
 ) {
     for event in reader.read() {
-        println!("{}", &event.data.0);
+        // println!("{}", &event.data.0);
         writer.send(event.end());
     }
 }

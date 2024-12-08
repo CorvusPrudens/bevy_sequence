@@ -16,9 +16,9 @@ impl<T> Limit<T> {
 #[derive(Debug, Component)]
 pub struct LimitItem(usize);
 
-impl<T, C, D> IntoFragment<C, D> for Limit<T>
+impl<T, C, D> IntoFragment<D, C> for Limit<T>
 where
-    T: IntoFragment<C, D>,
+    T: IntoFragment<D, C>,
     D: Threaded,
 {
     fn into_fragment(self, context: &C, commands: &mut Commands) -> FragmentId {

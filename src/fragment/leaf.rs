@@ -1,8 +1,9 @@
-use crate::app::SequenceSets;
-use crate::fragment::{BeginEvent, BeginKind, EndEvent, EndKind, SelectedFragments};
+use crate::fragment::event::{BeginStage, StageEvent};
 use crate::prelude::*;
 use bevy_ecs::event::EventRegistry;
 use bevy_ecs::prelude::*;
+
+use super::event::OnBeginUp;
 
 /// A leaf fragment.
 ///
@@ -22,83 +23,40 @@ impl<T> DataLeaf<T> {
     }
 }
 
-impl<T, Context, Data: Threaded> IntoFragment<Context, Data> for DataLeaf<T>
+impl<T, Data: Threaded, Context> IntoFragment<Data, Context> for DataLeaf<T>
 where
     Data: From<T> + Clone,
 {
     fn into_fragment(self, _: &Context, commands: &mut Commands) -> FragmentId {
         commands.queue(|world: &mut World| {
-            crate::app::add_systems_checked(
-                world,
-                bevy_app::prelude::PreUpdate,
-                emit_leaves::<Data>.in_set(SequenceSets::Emit),
-            );
+            // crate::app::add_systems_checked(
+            //     world,
+            //     bevy_app::prelude::PreUpdate,
+            //     emit_leaves::<Data>.in_set(SequenceSets::Emit),
+            // );
 
             if !world.contains_resource::<Events<FragmentEvent<Data>>>() {
                 EventRegistry::register_event::<FragmentEvent<Data>>(world);
             }
         });
 
-        let entity = commands.spawn(DataLeaf::<Data>(self.0.into()));
+        let data: Data = self.0.into();
+        let emitter = commands.register_system(
+            move |input: In<StageEvent<BeginStage>>,
+                  mut writer: EventWriter<FragmentEvent<Data>>| {
+                writer.send(FragmentEvent {
+                    id: input.0.id,
+                    data: data.clone(),
+                });
+            },
+        );
+        let mut entity = commands.spawn(Leaf);
+        let id = entity.id();
+        entity
+            .entry::<OnBeginUp>()
+            .or_default()
+            .and_modify(move |mut ob| ob.0.push(emitter));
 
-        FragmentId::new(entity.id())
-    }
-}
-
-fn emit_leaves<Data>(
-    mut leaves: Query<(&DataLeaf<Data>, &mut FragmentState)>,
-    mut writer: EventWriter<FragmentEvent<Data>>,
-    selected_fragments: Res<SelectedFragments>,
-    mut commands: Commands,
-) where
-    Data: Threaded + Clone,
-{
-    for fragment in selected_fragments.0.iter().copied() {
-        if let Ok((leaf, mut state)) = leaves.get_mut(fragment) {
-            let event = EventId::new();
-
-            state.active_events.insert(event);
-            state.triggered += 1;
-
-            let id = IdPair {
-                fragment: FragmentId::new(fragment),
-                event,
-            };
-
-            commands.trigger_targets(
-                BeginEvent {
-                    id,
-                    kind: BeginKind::Start,
-                },
-                fragment,
-            );
-
-            writer.send(FragmentEvent {
-                id,
-                data: leaf.0.clone(),
-            });
-        }
-    }
-}
-
-pub fn respond_to_leaf(
-    mut leaves: Query<&mut FragmentState, With<Leaf>>,
-    mut reader: EventReader<FragmentEndEvent>,
-    mut commands: Commands,
-) {
-    for event in reader.read() {
-        if let Ok(mut state) = leaves.get_mut(event.0.fragment.0) {
-            if state.active_events.remove(event.0.event) {
-                state.completed += 1;
-
-                commands.trigger_targets(
-                    EndEvent {
-                        id: event.0,
-                        kind: EndKind::End,
-                    },
-                    event.0.fragment.0,
-                );
-            }
-        }
+        FragmentId::new(id)
     }
 }

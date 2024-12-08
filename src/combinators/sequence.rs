@@ -1,4 +1,4 @@
-use crate::fragment::{BeginEvent, BeginKind, EndEvent, EndKind};
+use crate::fragment::event::{BeginStage, EndStage, MapContext, MapFn, StageEvent};
 use crate::prelude::*;
 use bevy_ecs::prelude::*;
 use bevy_hierarchy::prelude::*;
@@ -37,87 +37,51 @@ pub(super) fn update_sequence_items(
     }
 }
 
-pub(super) fn sequence_begin_observer(
-    trigger: Trigger<BeginEvent>,
-    mut parent: Query<(&mut FragmentState, &Children), With<Sequence>>,
-    child: Query<&Parent>,
-    mut commands: Commands,
-) {
-    let child_id = trigger.entity();
-    let Ok(parent_id) = child.get(child_id).map(|p| p.get()) else {
-        return;
+fn map_begin(input: MapContext<BeginStage>, first: Option<Entity>) -> StageEvent<BeginStage> {
+    let first = match (first, input.child) {
+        (Some(first), Some(child)) => first == child,
+        _ => false,
     };
 
-    let Ok((mut state, children)) = parent.get_mut(parent_id) else {
-        return;
-    };
-
-    let first = children.first().is_some_and(|f| *f == child_id);
-    state.active_events.insert(trigger.id.event);
-
-    let kind = if first && trigger.kind == BeginKind::Start {
-        state.triggered += 1;
-        BeginKind::Start
+    if first && input.event.stage == BeginStage::Start {
+        StageEvent {
+            id: input.event.id,
+            stage: BeginStage::Start,
+        }
     } else {
-        BeginKind::Visit
-    };
-
-    commands.trigger_targets(
-        BeginEvent {
-            id: trigger.id,
-            kind,
-        },
-        parent_id,
-    );
-
-    // info!("observed begin event! {trigger:?}");
+        StageEvent {
+            id: input.event.id,
+            stage: BeginStage::Visit,
+        }
+    }
 }
 
-pub(super) fn sequence_end_observer(
-    trigger: Trigger<EndEvent>,
-    mut parent: Query<(&mut FragmentState, &Children), With<Sequence>>,
-    child: Query<&Parent>,
-    mut commands: Commands,
-) {
-    let child_id = trigger.entity();
-    let Ok(parent_id) = child.get(child_id).map(|p| p.get()) else {
-        return;
+fn map_end(input: MapContext<EndStage>, last: Option<Entity>) -> StageEvent<EndStage> {
+    let last = match (last, input.child) {
+        (Some(last), Some(child)) => last == child,
+        _ => false,
     };
 
-    let Ok((mut state, children)) = parent.get_mut(parent_id) else {
-        return;
-    };
-
-    let last = children.last().is_some_and(|f| *f == child_id);
-
-    if state.active_events.remove(trigger.id.event) {
-        let kind = if last && trigger.kind == EndKind::End {
-            state.completed += 1;
-            EndKind::End
-        } else {
-            EndKind::Visit
-        };
-
-        commands.trigger_targets(
-            EndEvent {
-                id: trigger.id,
-                kind,
-            },
-            parent_id,
-        );
+    if last && input.event.stage == EndStage::End {
+        StageEvent {
+            id: input.event.id,
+            stage: EndStage::End,
+        }
+    } else {
+        StageEvent {
+            id: input.event.id,
+            stage: EndStage::Visit,
+        }
     }
-
-    // info!("observed end event! {trigger:?}");
 }
 
 macro_rules! seq_frag {
     ($count:literal, $($ty:ident),*) => {
         #[allow(non_snake_case)]
-        impl<Context, Data, $($ty),*> IntoFragment<Context, Data> for ($($ty,)*)
+        impl<Data, Context, $($ty),*> IntoFragment<Data, Context> for ($($ty,)*)
         where
             Data: Threaded,
-            Context: Threaded,
-            $($ty: IntoFragment<Context, Data>),*
+            $($ty: IntoFragment<Data, Context>),*
         {
             #[allow(unused)]
             fn into_fragment(self, context: &Context, commands: &mut Commands) -> FragmentId {
@@ -127,7 +91,12 @@ macro_rules! seq_frag {
                     $($ty.into_fragment(context, commands).entity()),*
                 ];
 
-                FragmentId::new(commands.spawn(Sequence).add_children(&children).id())
+                let first = children.first().copied();
+                let last = children.last().copied();
+
+                let map_begin = MapFn::function(move |input| map_begin(input, first));
+                let map_end = MapFn::function(move |input| map_end(input, last));
+                FragmentId::new(commands.spawn((Sequence, map_begin, map_end)).add_children(&children).id())
             }
         }
     };
