@@ -19,14 +19,9 @@
 //!     // Play a sound
 //!     "Hello, Alice!".sound("hello.ogg"),
 //!     // Randomly select a fragment.
-//!     choice((
-//!         "Hey Bob...",
-//!         "Aren't you supposed to be working, Bob?",
-//!     )),
+//!     choice(("Hey Bob...", "Aren't you supposed to be working, Bob?")),
 //!     // Compute the value when this fragment is reached
-//!     compute(|res: Res<Temperature>| {
-//!         format!("{res} degrees, huh? Mighty fine weather!")
-//!     }),
+//!     compute(|res: Res<Temperature>| format!("{res} degrees, huh? Mighty fine weather!")),
 //! )
 //!     // Run this sequence to completion just once.
 //!     .once()
@@ -49,6 +44,8 @@
 //! }
 //! ```
 
+#![allow(clippy::type_complexity)]
+
 pub mod app;
 pub mod combinators;
 pub mod evaluate;
@@ -61,13 +58,11 @@ pub mod prelude {
 
     pub use crate::evaluate::{Evaluate, Evaluation};
 
-    pub use crate::fragment::{
-        spawn_root, Fragment, FragmentExt, FragmentId, FragmentState, IntoFragment,
-    };
+    pub use crate::fragment::{spawn_root, Fragment, FragmentId, FragmentState, IntoFragment};
 
     pub use crate::fragment::event::{EventId, FragmentEndEvent, FragmentEvent, IdPair};
 
-    pub use crate::combinators::select::select;
+    pub use crate::combinators::{select::select, FragmentExt};
 
     pub use crate::Threaded;
 }

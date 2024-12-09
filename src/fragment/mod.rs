@@ -1,4 +1,4 @@
-use crate::combinators;
+use crate::combinators::or::OrItem;
 use crate::evaluate::{Evaluate, Evaluation};
 use crate::Threaded;
 use bevy_ecs::prelude::*;
@@ -41,41 +41,9 @@ pub fn spawn_root_with_context<Data: Threaded, Context: Component>(
     commands.entity(root.0).insert((Root, context));
 }
 
-impl<T> FragmentExt for T {}
-
-pub trait FragmentExt: Sized {
-    /// Limit this fragment to `n` triggers.
-    fn limit(self, n: usize) -> combinators::Limit<Self> {
-        combinators::Limit::new(self, n)
-    }
-
-    /// Set this fragment's limit to 1.
-    fn once(self) -> combinators::Limit<Self> {
-        self.limit(1)
-    }
-
-    /// Wrap this fragment in an evaluation.
-    fn eval<S, O, M>(self, system: S) -> combinators::Evaluated<Self, S, O, M>
-    where
-        S: IntoSystem<(), O, M> + 'static,
-        O: Evaluate + 'static,
-    {
-        combinators::Evaluated::new(self, system)
-    }
-
-    /// Wrap this fragment in an evaluation.
-    ///
-    /// This will pass the fragment's ID to the provided systme.
-    fn eval_id<S, O, M>(self, system: S) -> combinators::EvaluatedWithId<Self, S, O, M>
-    where
-        S: IntoSystem<In<FragmentId>, O, M> + 'static,
-        O: Evaluate + 'static,
-    {
-        combinators::EvaluatedWithId::new(self, system)
-    }
-}
-
 #[derive(Debug, Component, Default, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FragmentState {
     pub triggered: usize,
     pub completed: usize,
@@ -103,21 +71,39 @@ pub(crate) fn clear_evals(mut evals: Query<&mut Evaluation>) {
 fn descend_tree(
     node: Entity,
     evaluation: Evaluation,
-    fragments: &Query<(&Evaluation, Option<&Children>, Option<&Leaf>)>,
+    fragments: &Query<(
+        &Evaluation,
+        Option<&Children>,
+        Option<&Leaf>,
+        Option<&OrItem>,
+    )>,
     leaves: &mut Vec<(Entity, Evaluation)>,
+    first_eval: &mut Option<Evaluation>,
 ) {
-    let Ok((eval, children, leaf)) = fragments.get(node) else {
+    let Ok((eval, children, leaf, or)) = fragments.get(node) else {
         return;
     };
 
-    let new_eval = *eval & evaluation;
+    let eval = match (*first_eval, or) {
+        (Some(first), Some(_)) if first.result.is_some() => {
+            *eval & (!first.result.unwrap_or_default()).evaluate()
+        }
+        _ => *eval,
+    };
+
+    let new_eval = eval & evaluation;
+
+    if first_eval.is_none() {
+        *first_eval = Some(new_eval);
+    }
 
     if new_eval.result.unwrap_or_default() {
         if leaf.is_some() {
             leaves.push((node, new_eval));
         } else {
+            let mut first_eval = None;
             for child in children.iter().flat_map(|c| c.iter()) {
-                descend_tree(*child, new_eval, fragments, leaves);
+                descend_tree(*child, new_eval, fragments, leaves, &mut first_eval);
             }
         }
     }
@@ -128,14 +114,20 @@ pub struct SelectedFragments(pub Vec<Entity>);
 
 pub fn select_fragments(
     roots: Query<(Entity, &Evaluation), With<Root>>,
-    fragments: Query<(&Evaluation, Option<&Children>, Option<&Leaf>)>,
+    fragments: Query<(
+        &Evaluation,
+        Option<&Children>,
+        Option<&Leaf>,
+        Option<&OrItem>,
+    )>,
     mut selected_fragments: ResMut<SelectedFragments>,
 ) {
     // traverse trees to build up full evaluatinos
     let mut leaves = Vec::new();
 
     for (root, eval) in roots.iter() {
-        descend_tree(root, *eval, &fragments, &mut leaves);
+        let mut or = None;
+        descend_tree(root, *eval, &fragments, &mut leaves, &mut or);
     }
 
     leaves.sort_by_key(|(_, e)| e.count);

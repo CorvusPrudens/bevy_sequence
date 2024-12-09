@@ -17,16 +17,29 @@ pub struct SequencePlugin;
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SequenceSets {
     /// Evaluate node scores.
+    ///
+    /// This set is placed in [PreUpdate].
     Evaluate,
 
     /// Iterate over all nodes and determine which, if any, should be selected.
+    ///
+    /// This set is placed in [PreUpdate].
     Select,
 
     /// Emit events from the selected nodes.
+    ///
+    /// This set is placed in [PreUpdate].
     Emit,
 
     /// Respond to end events.
+    ///
+    /// This set is placed in [PostUpdate].
     Respond,
+
+    /// Save node state.
+    ///
+    /// This set is placed in [PostUpdate].
+    Save,
 }
 
 impl Plugin for SequencePlugin {
@@ -67,7 +80,8 @@ impl Plugin for SequencePlugin {
                     SequenceSets::Select.after(SequenceSets::Evaluate),
                     SequenceSets::Emit.after(SequenceSets::Select),
                 ),
-            );
+            )
+            .configure_sets(PostUpdate, SequenceSets::Save.after(SequenceSets::Respond));
 
         // .add_observer(crate::fragment::event::end_up)
         // .add_observer(crate::fragment::event::begin_up);

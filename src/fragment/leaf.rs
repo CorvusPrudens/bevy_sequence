@@ -1,9 +1,7 @@
-use crate::fragment::event::{BeginStage, StageEvent};
+use super::event::InsertBeginDown;
 use crate::prelude::*;
 use bevy_ecs::event::EventRegistry;
 use bevy_ecs::prelude::*;
-
-use super::event::OnBeginUp;
 
 /// A leaf fragment.
 ///
@@ -29,33 +27,21 @@ where
 {
     fn into_fragment(self, _: &Context, commands: &mut Commands) -> FragmentId {
         commands.queue(|world: &mut World| {
-            // crate::app::add_systems_checked(
-            //     world,
-            //     bevy_app::prelude::PreUpdate,
-            //     emit_leaves::<Data>.in_set(SequenceSets::Emit),
-            // );
-
             if !world.contains_resource::<Events<FragmentEvent<Data>>>() {
                 EventRegistry::register_event::<FragmentEvent<Data>>(world);
             }
         });
 
         let data: Data = self.0.into();
-        let emitter = commands.register_system(
-            move |input: In<StageEvent<BeginStage>>,
-                  mut writer: EventWriter<FragmentEvent<Data>>| {
-                writer.send(FragmentEvent {
-                    id: input.0.id,
+        let id = commands
+            .spawn(Leaf)
+            .insert_begin_down(move |event, world| {
+                world.send_event(FragmentEvent {
+                    id: event.id,
                     data: data.clone(),
                 });
-            },
-        );
-        let mut entity = commands.spawn(Leaf);
-        let id = entity.id();
-        entity
-            .entry::<OnBeginUp>()
-            .or_default()
-            .and_modify(move |mut ob| ob.0.push(emitter));
+            })
+            .id();
 
         FragmentId::new(id)
     }

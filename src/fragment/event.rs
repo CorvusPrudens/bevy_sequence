@@ -1,12 +1,13 @@
+use super::{FragmentState, Root, SelectedFragments};
 use crate::prelude::FragmentId;
-use bevy_ecs::{component::StorageType, prelude::*, system::SystemId, traversal::Traversal};
+use bevy_ecs::{prelude::*, system::SystemId, traversal::Traversal};
 use bevy_hierarchy::Parent;
 use std::{marker::PhantomData, sync::Arc};
 
-use super::{FragmentState, Root, SelectedFragments};
-
 /// A unique ID generated for every emitted event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EventId(u64);
 
 impl EventId {
@@ -24,6 +25,8 @@ impl Default for EventId {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "reflect", derive(bevy_reflect::Reflect))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ActiveEvents(Vec<EventId>);
 
 impl core::ops::Deref for ActiveEvents {
@@ -144,32 +147,58 @@ impl Traversal for &'static EventPath {
 }
 
 macro_rules! callback {
-    ($name:ident, $ty:ty) => {
-        #[derive(Debug, Clone, Default)]
-        pub struct $name(pub $ty);
+    ($name:ident, $stage:ty, $tr:ident, $method:ident) => {
+        #[derive(Clone, Component)]
+        pub struct $name(
+            pub Vec<Arc<dyn Fn(StageEvent<$stage>, &mut World) + Send + Sync + 'static>>,
+        );
 
-        impl Component for $name {
-            const STORAGE_TYPE: StorageType = StorageType::Table;
+        impl Default for $name {
+            fn default() -> Self {
+                $name(vec![])
+            }
+        }
 
-            fn register_component_hooks(hooks: &mut bevy_ecs::component::ComponentHooks) {
-                hooks.on_remove(|mut world, entity, _| {
-                    let entity = world.entity(entity);
-                    let items = entity.components::<&$name>().0.clone();
-                    let mut commands = world.commands();
+        // impl Component for $name {
+        //     const STORAGE_TYPE: StorageType = StorageType::Table;
 
-                    for item in items {
-                        commands.unregister_system(item);
-                    }
-                });
+        //     fn register_component_hooks(hooks: &mut bevy_ecs::component::ComponentHooks) {
+        //         hooks.on_remove(|mut world, entity, _| {
+        //             let entity = world.entity(entity);
+        //             let items = entity.components::<&$name>().0.clone();
+        //             let mut commands = world.commands();
+
+        //             for item in items {
+        //                 commands.unregister_system(item);
+        //             }
+        //         });
+        //     }
+        // }
+
+        pub trait $tr {
+            fn $method<F>(&mut self, hook: F) -> &mut Self
+            where
+                F: Fn(StageEvent<$stage>, &mut World) + Send + Sync + 'static;
+        }
+
+        impl $tr for EntityCommands<'_> {
+            fn $method<F>(&mut self, hook: F) -> &mut Self
+            where
+                F: Fn(StageEvent<$stage>, &mut World) + Send + Sync + 'static,
+            {
+                self.entry::<$name>()
+                    .or_default()
+                    .and_modify(move |mut ob| ob.0.push(Arc::new(hook)));
+                self
             }
         }
     };
 }
 
-callback!(OnBeginUp, Vec<SystemId<In<StageEvent<BeginStage>>>>);
-callback!(OnBeginDown, Vec<SystemId<In<StageEvent<BeginStage>>>>);
-callback!(OnEndUp, Vec<SystemId<In<StageEvent<EndStage>>>>);
-callback!(OnEndDown, Vec<SystemId<In<StageEvent<EndStage>>>>);
+callback!(OnBeginUp, BeginStage, InsertBeginUp, insert_begin_up);
+callback!(OnBeginDown, BeginStage, InsertBeginDown, insert_begin_down);
+callback!(OnEndUp, EndStage, InsertEndUp, insert_end_up);
+callback!(OnEndDown, EndStage, InsertEndDown, insert_end_down);
 
 pub struct MapContext<Stage> {
     pub target: Entity,
@@ -222,13 +251,13 @@ fn begin_recursive(
     world: &mut World,
 ) -> Option<()> {
     let child = world.get_entity(node).ok()?;
-    let (parent_id, on_begin, on_begin_down, root, map) = child.get_components::<(
-        Option<&Parent>,
-        Option<&OnBeginUp>,
-        Option<&OnBeginDown>,
-        Option<&Root>,
-        Option<&MapFn<BeginStage>>,
-    )>()?;
+    let (parent_id, on_begin, on_begin_down, root, map) = child.get_components::<AnyOf<(
+        &Parent,
+        &OnBeginUp,
+        &OnBeginDown,
+        &Root,
+        &MapFn<BeginStage>,
+    )>>()?;
 
     let (parent_id, on_begin, on_begin_down, root, map) = (
         parent_id.map(|p| p.get()),
@@ -250,7 +279,9 @@ fn begin_recursive(
     }
 
     for system in on_begin.iter().flat_map(|o| o.0.iter()) {
-        world.run_system_with_input(*system, event).unwrap();
+        // world.run_system_with_input(*system, event).unwrap();
+
+        (system)(event, world);
     }
 
     let mut child = world.get_entity_mut(node).ok()?;
@@ -268,7 +299,8 @@ fn begin_recursive(
     }
 
     for system in on_begin_down.iter().flat_map(|o| o.0.iter()) {
-        world.run_system_with_input(*system, event).unwrap();
+        // world.run_system_with_input(*system, event).unwrap();
+        (system)(event, world);
     }
 
     Some(())
@@ -304,13 +336,9 @@ fn end_recursive(
     world: &mut World,
 ) -> Option<()> {
     let child = world.get_entity(node).ok()?;
-    let (parent_id, on_end, on_end_down, root, map) = child.get_components::<(
-        Option<&Parent>,
-        Option<&OnEndUp>,
-        Option<&OnEndDown>,
-        Option<&Root>,
-        Option<&MapFn<EndStage>>,
-    )>()?;
+    let (parent_id, on_end, on_end_down, root, map) =
+        child
+            .get_components::<AnyOf<(&Parent, &OnEndUp, &OnEndDown, &Root, &MapFn<EndStage>)>>()?;
 
     let (parent_id, on_end, on_end_down, root, map) = (
         parent_id.map(|p| p.get()),
@@ -336,7 +364,8 @@ fn end_recursive(
         }
 
         for system in on_end.iter().flat_map(|o| o.0.iter()) {
-            world.run_system_with_input(*system, event).unwrap();
+            // world.run_system_with_input(*system, event).unwrap();
+            (system)(event, world);
         }
 
         let mut child = world.get_entity_mut(node).ok()?;
@@ -353,7 +382,8 @@ fn end_recursive(
         }
 
         for system in on_end_down.iter().flat_map(|o| o.0.iter()) {
-            world.run_system_with_input(*system, event).unwrap();
+            // world.run_system_with_input(*system, event).unwrap();
+            (system)(event, world);
         }
     }
 

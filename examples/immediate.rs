@@ -17,9 +17,9 @@ fn main() {
 
                 info!("Starting up");
 
-                for _ in 0..1000 {
-                    spawn_root(scene(), &mut commands);
-                }
+                // for _ in 0..1000 {
+                spawn_root(shopkeep().limit(2), &mut commands);
+                // }
             },
         )
         .insert_resource(StepTime(Timer::new(
@@ -40,6 +40,21 @@ fn scene() -> impl IntoFragment<Dialogue> {
         "Crazy weather we're having, huh?",
     )
         .eval(|| true)
+}
+
+fn shopkeep() -> impl IntoFragment<Dialogue> {
+    (
+        (
+            "First time, eh?",
+            "Let's give you the rundown:",
+            "you pay me, we got a deal.",
+        )
+            .once()
+            .or("Well then..."),
+        "What are you buying?",
+    )
+        .eval(|| true)
+        .save_as("shopkeep_greet")
 }
 
 fn nested() -> impl IntoFragment<Dialogue> {
@@ -71,7 +86,7 @@ fn ping_pong(
     mut writer: EventWriter<FragmentEndEvent>,
 ) {
     for event in reader.read() {
-        // println!("{}", &event.data.0);
+        println!("{}", &event.data.0);
         writer.send(event.end());
     }
 }

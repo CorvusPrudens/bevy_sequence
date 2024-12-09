@@ -52,12 +52,6 @@ impl Component for SelectSystem {
         required_components: &mut bevy_ecs::component::RequiredComponents,
         inheritance_depth: u16,
     ) {
-        components.register_required_components_manual::<Self, Fragment>(
-            storages,
-            required_components,
-            <Fragment as Default>::default,
-            inheritance_depth,
-        );
         <Fragment as bevy_ecs::component::Component>::register_required_components(
             component_id,
             components,
@@ -80,7 +74,7 @@ where
         // Register the provided system.
         let system_id = commands.register_system(self.system);
 
-        // Spawn a parent entity with Select and SelectSystem.wasn't in the cari
+        // Spawn a parent entity with Select and SelectSystem
         let parent = commands
             .spawn((SelectSystem(system_id), SelectActiveNode(None)))
             .add_children(children.as_ref())
