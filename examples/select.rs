@@ -6,7 +6,7 @@ fn main() {
         .add_plugins((MinimalPlugins, LogPlugin::default(), SequencePlugin))
         .add_systems(Startup, |mut commands: Commands| {
             info!("Starting up");
-            spawn_root(shopkeep().limit(2), &mut commands);
+            spawn_root(count(), &mut commands);
         })
         .add_systems(Update, ping_pong)
         .run();
@@ -15,19 +15,14 @@ fn main() {
 #[derive(Debug, Clone)]
 struct Dialogue(String);
 
-fn shopkeep() -> impl IntoFragment<Dialogue> {
-    (
-        (
-            "First time, eh?",
-            "Let's give you the rundown:",
-            "you pay me, we got a deal.",
-        )
-            .once()
-            .or("Well then..."),
-        "What are you buying?",
-    )
-        .eval(|| true)
-        .save_as("shopkeep_greet")
+fn count() -> impl IntoFragment<Dialogue> {
+    select(("one", "two", "three"), |mut tick: Local<usize>| {
+        let value = *tick;
+        *tick += 1;
+        value
+    })
+    .limit(3)
+    .eval(|| true)
 }
 
 impl IntoFragment<Dialogue> for &'static str {

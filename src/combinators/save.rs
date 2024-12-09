@@ -4,8 +4,7 @@ use bevy_hierarchy::Children;
 use bevy_log::prelude::*;
 use bevy_utils::hashbrown::hash_map::Entry;
 use bevy_utils::HashMap;
-use std::iter::zip;
-use std::{any::TypeId, borrow::Cow};
+use std::{any::TypeId, borrow::Cow, iter::zip};
 
 /// Save a tree with a given name.
 pub struct Save<T> {

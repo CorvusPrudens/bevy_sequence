@@ -32,7 +32,7 @@ where
 pub struct SelectSystem(SystemId<(), usize>);
 
 #[derive(Clone, Copy, Component)]
-struct SelectActiveNode(Option<FragmentId>);
+pub(super) struct SelectActiveNode(usize);
 
 // Here we automatically clean up the system when this component is removed.
 impl Component for SelectSystem {
@@ -76,7 +76,7 @@ where
 
         // Spawn a parent entity with Select and SelectSystem
         let parent = commands
-            .spawn((SelectSystem(system_id), SelectActiveNode(None)))
+            .spawn((SelectSystem(system_id), SelectActiveNode(0)))
             .add_children(children.as_ref())
             .id();
 
@@ -87,14 +87,31 @@ where
 // This isn't _quite_ right since we'll need to handle
 // continuation and such once an item is actually chosen.
 pub(super) fn update_select_items(
-    choices: Query<(&Children, &SelectSystem)>,
+    choices: Query<(
+        Entity,
+        &Children,
+        &FragmentState,
+        &SelectSystem,
+        &SelectActiveNode,
+    )>,
     mut commands: Commands,
 ) {
-    let choices: Vec<_> = choices.iter().map(|(c, s)| (c.to_vec(), *s)).collect();
+    let choices: Vec<_> = choices
+        .iter()
+        .map(|(e, c, state, s, active)| {
+            (e, c.to_vec(), state.active_events.is_empty(), *s, *active)
+        })
+        .collect();
 
     commands.queue(|world: &mut World| {
-        for (children, choice_system) in choices {
-            let result = world.run_system(choice_system.0).unwrap();
+        for (e, children, empty, choice_system, active) in choices {
+            let result = if empty {
+                let result = world.run_system(choice_system.0).unwrap();
+                world.entity_mut(e).insert(SelectActiveNode(result));
+                result
+            } else {
+                active.0
+            };
 
             for (i, child) in children.iter().enumerate() {
                 let mut child = world.entity_mut(*child);

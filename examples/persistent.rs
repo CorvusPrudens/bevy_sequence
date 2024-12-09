@@ -1,4 +1,4 @@
-use bevy::{ecs::schedule::Stepping, log::LogPlugin, prelude::*};
+use bevy::{log::LogPlugin, prelude::*};
 use bevy_sequence::{combinators::save::SavedSequences, prelude::*};
 use std::time::Duration;
 
