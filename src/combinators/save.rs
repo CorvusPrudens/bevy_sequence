@@ -1,6 +1,7 @@
 use crate::prelude::*;
 use bevy_ecs::prelude::*;
 use bevy_hierarchy::Children;
+use bevy_log::prelude::*;
 use bevy_utils::hashbrown::hash_map::Entry;
 use bevy_utils::HashMap;
 use std::iter::zip;
@@ -29,7 +30,7 @@ pub struct SavedSequences(HashMap<Cow<'static, str>, SavedSequence>);
 pub struct SavedSequence {
     nodes: SavedNode,
     #[cfg(debug_assertions)]
-    #[serde(skip)]
+    #[cfg_attr(feature = "serde", serde(skip))]
     ty: Option<TypeId>,
 }
 
@@ -49,7 +50,7 @@ pub struct SequenceState {
     name: Cow<'static, str>,
     nodes: Option<SavedNode>,
     #[cfg(debug_assertions)]
-    #[serde(skip)]
+    #[cfg_attr(feature = "serde", serde(skip))]
     ty: Option<TypeId>,
 }
 
@@ -85,14 +86,15 @@ fn apply_saved_state(
     *frag_state = state.state.clone();
 
     match children {
-        Some(children) if children.len() == state.children.len() => {
-            bevy_utils::tracing::warn!(
-                "mismatch between saved state and entities for sequence {name}"
+        Some(children) if children.len() != state.children.len() => {
+            warn!(
+                "mismatch between saved state and entities for sequence \"{name}\": saved children {} does not match entities: {}",
+                state.children.len(), children.len(),
             );
         }
         None if !state.children.is_empty() => {
-            bevy_utils::tracing::warn!(
-                "mismatch between saved state and entities for sequence {name}"
+            warn!(
+                "mismatch between saved state and entities for sequence \"{name}\": expected children, but entity has none"
             );
         }
         Some(children) => {
@@ -165,12 +167,14 @@ pub(super) fn sync_sequence(
                 #[cfg(debug_assertions)]
                 {
                     if matches!((occ.ty, sequence.ty), (Some(a), Some(b)) if a != b) {
-                        bevy_utils::tracing::warn!(
-                            "name {} used for multiple sequences",
+                        warn_once!(
+                            "name \"{}\" used for multiple distinct sequences",
                             sequence.name
                         );
                     }
+                    occ.ty = sequence.ty;
                 }
+                occ.nodes = sequence.nodes.clone().unwrap_or_default();
             }
             Entry::Vacant(v) => {
                 v.insert(SavedSequence {

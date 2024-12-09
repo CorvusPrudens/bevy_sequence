@@ -47,6 +47,7 @@ pub fn spawn_root_with_context<Data: Threaded, Context: Component>(
 pub struct FragmentState {
     pub triggered: usize,
     pub completed: usize,
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub active_events: event::ActiveEvents,
 }
 

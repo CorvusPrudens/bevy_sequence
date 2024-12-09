@@ -1,14 +1,30 @@
 use bevy::{ecs::schedule::Stepping, log::LogPlugin, prelude::*};
-use bevy_sequence::prelude::*;
+use bevy_sequence::{combinators::save::SavedSequences, prelude::*};
+use std::time::Duration;
+
+const SAVE_FILE: &str = "target/sequence_data.json";
 
 fn main() {
     App::new()
+        .insert_resource(Persistent(Timer::new(
+            Duration::from_secs(1),
+            TimerMode::Repeating,
+        )))
         .add_plugins((MinimalPlugins, LogPlugin::default(), SequencePlugin))
-        .add_systems(Startup, |mut commands: Commands| {
-            info!("Starting up");
-            spawn_root(shopkeep().limit(2), &mut commands);
-        })
+        .add_systems(
+            Startup,
+            |mut commands: Commands, mut saved: ResMut<SavedSequences>| {
+                info!("Starting up");
+                spawn_root(shopkeep().limit(2), &mut commands);
+
+                if let Ok(data) = std::fs::read(SAVE_FILE) {
+                    let data = serde_json::from_slice(&data).unwrap();
+                    *saved = data;
+                }
+            },
+        )
         .add_systems(Update, ping_pong)
+        .add_systems(Last, save_sequences)
         .run();
 }
 
@@ -47,5 +63,17 @@ fn ping_pong(
     for event in reader.read() {
         println!("{}", &event.data.0);
         writer.send(event.end());
+    }
+}
+
+#[derive(Resource)]
+struct Persistent(Timer);
+
+fn save_sequences(mut pers: ResMut<Persistent>, time: Res<Time>, saved: Res<SavedSequences>) {
+    pers.0.tick(time.delta());
+
+    if pers.0.just_finished() {
+        let data = serde_json::to_vec_pretty(saved.as_ref()).unwrap();
+        std::fs::write(SAVE_FILE, &data).unwrap();
     }
 }
