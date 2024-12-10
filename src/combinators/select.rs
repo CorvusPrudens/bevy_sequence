@@ -84,8 +84,6 @@ where
     }
 }
 
-// This isn't _quite_ right since we'll need to handle
-// continuation and such once an item is actually chosen.
 pub(super) fn update_select_items(
     choices: Query<(
         Entity,
@@ -98,9 +96,7 @@ pub(super) fn update_select_items(
 ) {
     let choices: Vec<_> = choices
         .iter()
-        .map(|(e, c, state, s, active)| {
-            (e, c.to_vec(), state.active_events.is_empty(), *s, *active)
-        })
+        .map(|(e, c, state, s, active)| (e, c.to_vec(), !state.active, *s, *active))
         .collect();
 
     commands.queue(|world: &mut World| {

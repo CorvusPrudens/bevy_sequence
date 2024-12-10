@@ -14,7 +14,7 @@ fn scene() -> impl IntoFragment<Dialogue> {
         "Hey Bob...",
         "Crazy weather we're having, huh?",
     )
-        .eval(|| true)
+        .always()
 }
 
 fn nested() -> impl IntoFragment<Dialogue> {
@@ -28,7 +28,7 @@ fn nested() -> impl IntoFragment<Dialogue> {
             (("Hey Bob!", "Hey, Alice 7!"), ("Hey Bob!", "Hey, Alice 8!")),
         ),
     )
-        .eval(|| true)
+        .always()
 }
 
 impl IntoFragment<Dialogue> for &'static str {

@@ -289,6 +289,7 @@ fn begin_recursive(
 
     if matches!(event.stage, BeginStage::Start) {
         state.triggered += 1;
+        state.active = true;
     }
     state.active_events.insert(event.id.event);
 
@@ -373,6 +374,7 @@ fn end_recursive(
 
         if matches!(event.stage, EndStage::End) {
             state.completed += 1;
+            state.active = false;
         }
 
         if root.is_none() {

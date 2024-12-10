@@ -42,7 +42,7 @@ fn shopkeep() -> impl IntoFragment<Dialogue> {
             .or("Well then..."),
         "What are you buying?",
     )
-        .eval(|| true)
+        .always()
         .save_as("shopkeep_greet")
 }
 

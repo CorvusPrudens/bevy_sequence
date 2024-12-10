@@ -1,8 +1,9 @@
-use std::borrow::Cow;
-
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
+use std::borrow::Cow;
 
+pub mod always;
+pub mod distribution;
 pub mod evaluated;
 pub mod hooks;
 pub mod limit;
@@ -11,6 +12,7 @@ pub mod save;
 pub mod select;
 pub mod sequence;
 
+pub use always::AlwaysFragment;
 pub use evaluated::{Evaluated, EvaluatedWithId};
 pub use hooks::{OnEnd, OnStart, OnVisit};
 pub use limit::Limit;
@@ -33,6 +35,7 @@ impl Plugin for CombinatorPlugin {
                     evaluated::custom_evals_ids,
                     limit::evaluate_limits,
                     select::update_select_items,
+                    always::evaluate_always,
                 )
                     .in_set(crate::app::SequenceSets::Evaluate),
             )
@@ -55,6 +58,14 @@ pub trait FragmentExt: Sized {
     /// Set this fragment's limit to 1.
     fn once(self) -> Limit<Self> {
         self.limit(1)
+    }
+
+    /// Always insert a true evaluation.
+    ///
+    /// This does not necessarily mean that the fragment will always run;
+    /// any false evaluation will still cause this fragment to be skipped.
+    fn always(self) -> AlwaysFragment<Self> {
+        AlwaysFragment::new(self)
     }
 
     /// If this fragment evaluates to false,

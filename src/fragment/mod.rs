@@ -48,6 +48,8 @@ pub struct FragmentState {
     pub triggered: usize,
     pub completed: usize,
     #[cfg_attr(feature = "serde", serde(skip))]
+    pub active: bool,
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub active_events: event::ActiveEvents,
 }
 
