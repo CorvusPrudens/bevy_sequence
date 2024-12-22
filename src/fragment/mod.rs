@@ -23,22 +23,40 @@ impl FragmentId {
     }
 }
 
-pub trait IntoFragment<Data: Threaded, Context = ()> {
-    fn into_fragment(self, context: &Context, commands: &mut Commands) -> FragmentId;
+#[derive(Debug)]
+pub struct Context<C> {
+    pub id: Entity,
+    pub value: C,
+}
+
+pub trait IntoFragment<Data: Threaded, C = ()> {
+    fn into_fragment(self, context: &Context<C>, commands: &mut Commands) -> FragmentId;
 }
 
 pub fn spawn_root<Data: Threaded>(fragment: impl IntoFragment<Data>, commands: &mut Commands) {
-    let root = fragment.into_fragment(&(), commands);
+    let root = fragment.into_fragment(
+        &Context {
+            id: Entity::PLACEHOLDER,
+            value: (),
+        },
+        commands,
+    );
     commands.entity(root.0).insert(Root);
 }
 
-pub fn spawn_root_with_context<Data: Threaded, Context: Component>(
-    fragment: impl IntoFragment<Data, Context>,
-    context: Context,
+pub fn spawn_root_with_context<Data: Threaded, C: Component>(
+    fragment: impl IntoFragment<Data, C>,
+    context: C,
     commands: &mut Commands,
 ) {
+    let id = commands.spawn_empty().id();
+    let context = Context { id, value: context };
+
     let root = fragment.into_fragment(&context, commands);
-    commands.entity(root.0).insert((Root, context));
+
+    // TODO: make sure this is removed when the root is removed
+    commands.entity(id).insert(context.value);
+    commands.entity(root.0).insert((Root,));
 }
 
 #[derive(Debug, Component, Default, Clone, PartialEq, Eq)]
