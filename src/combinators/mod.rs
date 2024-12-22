@@ -1,8 +1,9 @@
 use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
-use std::borrow::Cow;
+use std::{borrow::Cow, time::Duration};
 
 pub mod always;
+pub mod delay;
 pub mod distribution;
 pub mod evaluated;
 pub mod hooks;
@@ -13,6 +14,7 @@ pub mod select;
 pub mod sequence;
 
 pub use always::AlwaysFragment;
+pub use delay::Delay;
 pub use evaluated::{Evaluated, EvaluatedWithId};
 pub use hooks::{OnEnd, OnStart, OnVisit};
 pub use limit::Limit;
@@ -39,6 +41,7 @@ impl Plugin for CombinatorPlugin {
                 )
                     .in_set(crate::app::SequenceSets::Evaluate),
             )
+            .add_systems(Update, delay::manage_delay)
             .add_systems(
                 PostUpdate,
                 save::sync_sequence.in_set(crate::app::SequenceSets::Save),
@@ -163,5 +166,12 @@ pub trait FragmentExt: Sized {
         Self: 'static,
     {
         Save::new(self, name.into())
+    }
+
+    fn delay<S, M>(self, delay: Duration, system: S) -> Delay<Self, S, M>
+    where
+        S: IntoSystem<(), (), M>,
+    {
+        delay::Delay::new(self, delay, system)
     }
 }
