@@ -2,7 +2,10 @@ use super::{FragmentState, Root, SelectedFragments};
 use crate::prelude::FragmentId;
 use bevy_ecs::{prelude::*, system::SystemId, traversal::Traversal};
 use bevy_hierarchy::Parent;
-use std::{marker::PhantomData, sync::Arc};
+use std::{
+    marker::PhantomData,
+    sync::{Arc, Mutex},
+};
 
 /// A unique ID generated for every emitted event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -150,7 +153,7 @@ macro_rules! callback {
     ($name:ident, $stage:ty, $tr:ident, $method:ident) => {
         #[derive(Clone, Component)]
         pub struct $name(
-            pub Vec<Arc<dyn Fn(StageEvent<$stage>, &mut World) + Send + Sync + 'static>>,
+            pub Vec<Arc<Mutex<dyn FnMut(StageEvent<$stage>, &mut World) + Send + Sync + 'static>>>,
         );
 
         impl Default for $name {
@@ -178,17 +181,17 @@ macro_rules! callback {
         pub trait $tr {
             fn $method<F>(&mut self, hook: F) -> &mut Self
             where
-                F: Fn(StageEvent<$stage>, &mut World) + Send + Sync + 'static;
+                F: FnMut(StageEvent<$stage>, &mut World) + Send + Sync + 'static;
         }
 
         impl $tr for EntityCommands<'_> {
             fn $method<F>(&mut self, hook: F) -> &mut Self
             where
-                F: Fn(StageEvent<$stage>, &mut World) + Send + Sync + 'static,
+                F: FnMut(StageEvent<$stage>, &mut World) + Send + Sync + 'static,
             {
                 self.entry::<$name>()
                     .or_default()
-                    .and_modify(move |mut ob| ob.0.push(Arc::new(hook)));
+                    .and_modify(move |mut ob| ob.0.push(Arc::new(Mutex::new(hook))));
                 self
             }
         }
@@ -281,7 +284,7 @@ fn begin_recursive(
     for system in on_begin.iter().flat_map(|o| o.0.iter()) {
         // world.run_system_with_input(*system, event).unwrap();
 
-        (system)(event, world);
+        (system.lock().unwrap())(event, world);
     }
 
     let mut child = world.get_entity_mut(node).ok()?;
@@ -301,7 +304,7 @@ fn begin_recursive(
 
     for system in on_begin_down.iter().flat_map(|o| o.0.iter()) {
         // world.run_system_with_input(*system, event).unwrap();
-        (system)(event, world);
+        (system.lock().unwrap())(event, world);
     }
 
     Some(())
@@ -366,7 +369,7 @@ fn end_recursive(
 
         for system in on_end.iter().flat_map(|o| o.0.iter()) {
             // world.run_system_with_input(*system, event).unwrap();
-            (system)(event, world);
+            (system.lock().unwrap())(event, world);
         }
 
         let mut child = world.get_entity_mut(node).ok()?;
@@ -385,7 +388,7 @@ fn end_recursive(
 
         for system in on_end_down.iter().flat_map(|o| o.0.iter()) {
             // world.run_system_with_input(*system, event).unwrap();
-            (system)(event, world);
+            (system.lock().unwrap())(event, world);
         }
     }
 

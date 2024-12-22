@@ -96,6 +96,9 @@ pub trait FragmentExt: Sized {
 
     /// Run a system when this fragment is first reached.
     ///
+    /// The system can accept a shared or mutable reference
+    /// to the fragment context with `InRef` in `InMut`.
+    ///
     /// [OnStart] systems will be run from top-to-bottom.
     /// ```
     /// (
@@ -103,14 +106,18 @@ pub trait FragmentExt: Sized {
     /// )
     ///     .on_start(|| /* First */)
     /// ```
-    fn on_start<S, M>(self, system: S) -> OnStart<Self, S, M>
+    fn on_start<S, In, M>(self, system: S) -> OnStart<Self, S, In, M>
     where
-        S: IntoSystem<(), (), M> + Send + Sync + 'static,
+        S: IntoSystem<In, (), M> + Send + Sync + 'static,
+        In: SystemInput,
     {
         hooks::on_start(self, system)
     }
 
     /// Run a system when this fragment finishes.
+    ///
+    /// The system can accept a shared or mutable reference
+    /// to the fragment context with `InRef` in `InMut`.
     ///
     /// [OnEnd] systems will be run from bottom-to-top.
     /// ```
@@ -119,11 +126,32 @@ pub trait FragmentExt: Sized {
     /// )
     ///     .on_end(|| /* Second */)
     /// ```
-    fn on_end<S, M>(self, system: S) -> OnEnd<Self, S, M>
+    fn on_end<S, In, M>(self, system: S) -> OnEnd<Self, S, In, M>
     where
-        S: IntoSystem<(), (), M> + Send + Sync + 'static,
+        S: IntoSystem<In, (), M> + Send + Sync + 'static,
+        In: SystemInput,
     {
         hooks::on_end(self, system)
+    }
+
+    /// Run a system every time this fragment is visited.
+    ///
+    /// The system can accept a shared or mutable reference
+    /// to the fragment context with `InRef` in `InMut`.
+    ///
+    /// [OnVisit] systems will be run from top-to-bottom.
+    /// ```
+    /// (
+    ///     "fragment".on_visit(|| /* Second */),
+    /// )
+    ///     .on_end(|| /* First */)
+    /// ```
+    fn on_visit<S, In, M>(self, system: S) -> OnVisit<Self, S, In, M>
+    where
+        S: IntoSystem<In, (), M> + Send + Sync + 'static,
+        In: SystemInput,
+    {
+        hooks::on_visit(self, system)
     }
 
     /// Synchronize this fragment's state with a [save::SavedSequence] component.

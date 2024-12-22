@@ -1,3 +1,5 @@
+use std::sync::{Arc, RwLock};
+
 use crate::combinators::or::OrItem;
 use crate::evaluate::{Evaluate, Evaluation};
 use crate::Threaded;
@@ -23,40 +25,27 @@ impl FragmentId {
     }
 }
 
-#[derive(Debug)]
-pub struct Context<C> {
-    pub id: Entity,
-    pub value: C,
-}
+/// Arbitrary context provided to fragment trees.
+pub type Context<C = ()> = Arc<RwLock<C>>;
 
 pub trait IntoFragment<Data: Threaded, C = ()> {
     fn into_fragment(self, context: &Context<C>, commands: &mut Commands) -> FragmentId;
 }
 
 pub fn spawn_root<Data: Threaded>(fragment: impl IntoFragment<Data>, commands: &mut Commands) {
-    let root = fragment.into_fragment(
-        &Context {
-            id: Entity::PLACEHOLDER,
-            value: (),
-        },
-        commands,
-    );
+    let root = fragment.into_fragment(&Arc::new(RwLock::new(())), commands);
+
     commands.entity(root.0).insert(Root);
 }
 
-pub fn spawn_root_with_context<Data: Threaded, C: Component>(
+pub fn spawn_root_with<Data: Threaded, C>(
     fragment: impl IntoFragment<Data, C>,
-    context: C,
     commands: &mut Commands,
+    context: C,
 ) {
-    let id = commands.spawn_empty().id();
-    let context = Context { id, value: context };
+    let root = fragment.into_fragment(&Arc::new(RwLock::new(context)), commands);
 
-    let root = fragment.into_fragment(&context, commands);
-
-    // TODO: make sure this is removed when the root is removed
-    commands.entity(id).insert(context.value);
-    commands.entity(root.0).insert((Root,));
+    commands.entity(root.0).insert(Root);
 }
 
 #[derive(Debug, Component, Default, Clone, PartialEq, Eq)]
@@ -73,7 +62,7 @@ pub struct FragmentState {
 
 /// An entity representing a sequence fragment.
 #[derive(Debug, Default, Component)]
-#[require(Evaluation, FragmentState, event::EventPath)]
+#[require(Evaluation, FragmentState)]
 pub struct Fragment;
 
 /// A root fragment.

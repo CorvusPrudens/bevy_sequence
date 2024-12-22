@@ -35,14 +35,14 @@ impl Component for EvalSystemId {
     }
 }
 
-impl<Context, Data, F, T, O, M> IntoFragment<Data, Context> for EvaluatedWithId<F, T, O, M>
+impl<C, Data, F, T, O, M> IntoFragment<Data, C> for EvaluatedWithId<F, T, O, M>
 where
-    F: IntoFragment<Data, Context>,
+    F: IntoFragment<Data, C>,
     T: IntoSystem<In<FragmentId>, O, M> + 'static,
     O: Evaluate + 'static,
     Data: Threaded,
 {
-    fn into_fragment(self, context: &Context, commands: &mut Commands) -> FragmentId {
+    fn into_fragment(self, context: &Context<C>, commands: &mut Commands) -> FragmentId {
         let id = self.fragment.into_fragment(context, commands);
         let system = commands.register_system(self.evaluation.map(|input: O| input.evaluate()));
 
@@ -101,14 +101,14 @@ impl Component for EvalSystem {
     }
 }
 
-impl<Context, Data, F, T, O, M> IntoFragment<Data, Context> for Evaluated<F, T, O, M>
+impl<C, Data, F, T, O, M> IntoFragment<Data, C> for Evaluated<F, T, O, M>
 where
-    F: IntoFragment<Data, Context>,
+    F: IntoFragment<Data, C>,
     T: IntoSystem<(), O, M> + 'static,
     O: Evaluate + 'static,
     Data: Threaded,
 {
-    fn into_fragment(self, context: &Context, commands: &mut Commands) -> FragmentId {
+    fn into_fragment(self, context: &Context<C>, commands: &mut Commands) -> FragmentId {
         let id = self.fragment.into_fragment(context, commands);
         let system = commands.register_system(self.evaluation.map(|input: O| input.evaluate()));
 

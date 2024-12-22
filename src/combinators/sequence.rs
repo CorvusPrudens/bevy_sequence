@@ -78,13 +78,13 @@ fn map_end(input: MapContext<EndStage>, last: Option<Entity>) -> StageEvent<EndS
 macro_rules! seq_frag {
     ($count:literal, $($ty:ident),*) => {
         #[allow(non_snake_case)]
-        impl<Data, Context, $($ty),*> IntoFragment<Data, Context> for ($($ty,)*)
+        impl<Data, C, $($ty),*> IntoFragment<Data, C> for ($($ty,)*)
         where
             Data: Threaded,
-            $($ty: IntoFragment<Data, Context>),*
+            $($ty: IntoFragment<Data, C>),*
         {
             #[allow(unused)]
-            fn into_fragment(self, context: &Context, commands: &mut Commands) -> FragmentId {
+            fn into_fragment(self, context: &Context<C>, commands: &mut Commands) -> FragmentId {
                 let ($($ty,)*) = self;
 
                 let children: [_; $count] = [

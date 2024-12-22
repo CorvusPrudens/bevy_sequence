@@ -58,7 +58,9 @@ pub mod prelude {
 
     pub use crate::evaluate::{Evaluate, Evaluation};
 
-    pub use crate::fragment::{spawn_root, Fragment, FragmentId, FragmentState, IntoFragment};
+    pub use crate::fragment::{
+        spawn_root, spawn_root_with, Context, Fragment, FragmentId, FragmentState, IntoFragment,
+    };
 
     pub use crate::fragment::event::{EventId, FragmentEndEvent, FragmentEvent, IdPair};
 

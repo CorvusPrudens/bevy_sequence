@@ -23,7 +23,7 @@ where
     B: IntoFragment<D, C>,
     D: Threaded,
 {
-    fn into_fragment(self, context: &C, commands: &mut Commands) -> FragmentId {
+    fn into_fragment(self, context: &Context<C>, commands: &mut Commands) -> FragmentId {
         let a = self.a.into_fragment(context, commands);
         let b = self.b.into_fragment(context, commands);
 

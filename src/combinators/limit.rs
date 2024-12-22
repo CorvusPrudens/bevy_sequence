@@ -21,7 +21,7 @@ where
     T: IntoFragment<D, C>,
     D: Threaded,
 {
-    fn into_fragment(self, context: &C, commands: &mut Commands) -> FragmentId {
+    fn into_fragment(self, context: &Context<C>, commands: &mut Commands) -> FragmentId {
         let id = self.fragment.into_fragment(context, commands);
         commands.entity(id.entity()).insert(LimitItem(self.limit));
 

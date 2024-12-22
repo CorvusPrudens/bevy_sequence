@@ -62,13 +62,13 @@ impl Component for SelectSystem {
     }
 }
 
-impl<Context, Data, F, T, M> IntoFragment<Data, Context> for SelectFragment<F, T, M>
+impl<C, Data, F, T, M> IntoFragment<Data, C> for SelectFragment<F, T, M>
 where
     Data: Threaded,
-    F: IntoChildren<Data, Context>,
+    F: IntoChildren<Data, C>,
     T: IntoSystem<(), usize, M> + 'static,
 {
-    fn into_fragment(self, context: &Context, commands: &mut Commands) -> FragmentId {
+    fn into_fragment(self, context: &Context<C>, commands: &mut Commands) -> FragmentId {
         let children = self.fragments.into_children(context, commands);
 
         // Register the provided system.

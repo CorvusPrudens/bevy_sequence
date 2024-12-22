@@ -32,7 +32,7 @@ fn nested() -> impl IntoFragment<Dialogue> {
 }
 
 impl IntoFragment<Dialogue> for &'static str {
-    fn into_fragment(self, context: &(), commands: &mut Commands) -> FragmentId {
+    fn into_fragment(self, context: &Context, commands: &mut Commands) -> FragmentId {
         <_ as IntoFragment<Dialogue>>::into_fragment(
             bevy_sequence::fragment::DataLeaf::new(Dialogue(self)),
             context,

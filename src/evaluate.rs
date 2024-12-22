@@ -87,43 +87,6 @@ impl core::ops::BitAnd for Evaluation {
     }
 }
 
-#[derive(Debug, Component, Default, Clone, Copy, PartialEq, Eq)]
-pub struct FragmentState {
-    pub triggered: usize,
-    pub completed: usize,
-    pub active: bool,
-}
-
-#[derive(Resource, Debug, Default)]
-pub struct FragmentStates {
-    pub state: HashMap<FragmentId, FragmentState>,
-}
-
-#[allow(unused)]
-impl FragmentStates {
-    pub fn update(&mut self, id: FragmentId) -> &mut FragmentState {
-        self.state.entry(id).or_default()
-    }
-
-    pub fn get(&self, id: FragmentId) -> Option<&FragmentState> {
-        self.state.get(&id)
-    }
-
-    pub fn is_done(&self, id: FragmentId) -> bool {
-        self.state
-            .get(&id)
-            .is_some_and(|s| s.completed >= 1 && !s.active)
-    }
-
-    pub fn is_active(&self, id: FragmentId) -> bool {
-        self.state.get(&id).is_some_and(|s| s.active)
-    }
-
-    pub fn has_triggered(&self, id: FragmentId) -> bool {
-        self.state.get(&id).is_some_and(|s| s.triggered > 0)
-    }
-}
-
 #[derive(Resource, Debug, Default)]
 pub struct EvaluatedFragments {
     pub(super) evaluations: HashMap<FragmentId, Evaluation>,

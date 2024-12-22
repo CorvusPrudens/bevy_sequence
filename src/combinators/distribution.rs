@@ -23,7 +23,7 @@ where
     D: Threaded,
     F: IntoChildren<D, C>,
 {
-    fn into_fragment(self, context: &C, commands: &mut Commands) -> FragmentId {
+    fn into_fragment(self, context: &Context<C>, commands: &mut Commands) -> FragmentId {
         let children = self.fragments.into_children(context, commands);
         commands.add_systems_checked(
             PreUpdate,
@@ -65,6 +65,7 @@ pub fn distribution<F, D, const LENGTH: usize>(
 }
 
 #[derive(Clone, Copy, Component)]
+#[require(Fragment)]
 pub(super) struct DistributionActiveNode(usize);
 
 #[derive(Component)]
@@ -73,20 +74,20 @@ pub(super) struct Distribution<X: SampleUniform + PartialOrd>(WeightedIndex<X>);
 macro_rules! distribution_implementation {
     ($count:literal, $($ty:ident),*) => {
         #[allow(non_snake_case)]
-        impl<Context, Data, D, $($ty),*> IntoFragment<Data, Context> for DistributionFragment<($($ty,)*), D, $count>
+        impl<C, Data, D, $($ty),*> IntoFragment<Data, C> for DistributionFragment<($($ty,)*), D, $count>
         where
             Data: Threaded,
             D: SampleUniform + PartialOrd + for<'a> std::ops::AddAssign<&'a D> + Clone + Default + Threaded,
             D::Sampler: Threaded,
-            $($ty: IntoFragment<Data, Context>),*
+            $($ty: IntoFragment<Data, C>),*
         {
-            fn into_fragment(self, context: &Context, commands: &mut Commands) -> FragmentId {
+            fn into_fragment(self, context: &Context<C>, commands: &mut Commands) -> FragmentId {
                 let ($($ty,)*) = self.fragments;
                 let children = [$($ty.into_fragment(context, commands) .entity()),*];
                 commands.add_systems_checked(PreUpdate, update_distribution_items::<D>.in_set(SequenceSets::Evaluate));
 
                 let mut entity = commands
-                    .spawn((Fragment, DistributionActiveNode(0)));
+                    .spawn(DistributionActiveNode(0));
 
                 entity.add_children(&children);
 

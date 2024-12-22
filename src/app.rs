@@ -118,7 +118,7 @@ pub trait AddSystemsChecked: Sized {
         C: IntoSystemConfigs<M> + Send + 'static;
 }
 
-impl<'w, 's> AddSystemsChecked for Commands<'w, 's> {
+impl AddSystemsChecked for Commands<'_, '_> {
     fn add_systems_checked<M, S, C>(&mut self, schedule: S, systems: C)
     where
         S: ScheduleLabel,
