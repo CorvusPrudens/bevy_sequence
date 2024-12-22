@@ -18,9 +18,9 @@ struct Dialogue(&'static str);
 
 fn scene() -> impl IntoFragment<Dialogue, Option<Entity>> {
     (
-        "Hello, Alice!".on_start2(|| println!("Hello, world!")),
-        "Hey Bob...".on_start2(|ctx: InRef<Option<Entity>>| println!("ctx: {ctx:?}")),
-        "Crazy weather we're having, huh?".on_start2(
+        "Hello, Alice!".on_start(|| println!("Hello, world!")),
+        "Hey Bob...".on_start(|ctx: InRef<Option<Entity>>| println!("ctx: {ctx:?}")),
+        "Crazy weather we're having, huh?".on_start(
             |mut ctx: InMut<Option<Entity>>, mut commands: Commands| {
                 *ctx = Some(commands.spawn_empty().id())
             },
