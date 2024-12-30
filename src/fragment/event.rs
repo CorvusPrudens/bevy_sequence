@@ -1,6 +1,6 @@
 use super::{FragmentState, Root, SelectedFragments};
 use crate::prelude::FragmentId;
-use bevy_ecs::{prelude::*, system::SystemId, traversal::Traversal};
+use bevy_ecs::{prelude::*, system::SystemId};
 use bevy_hierarchy::Parent;
 use std::{
     marker::PhantomData,
@@ -77,12 +77,25 @@ pub struct FragmentEvent<Data> {
 
 impl<Data> FragmentEvent<Data> {
     pub fn end(&self) -> FragmentEndEvent {
-        FragmentEndEvent(self.id)
+        FragmentEndEvent {
+            id: self.id,
+            interruption: false,
+        }
+    }
+
+    pub fn interrupt(&self) -> FragmentEndEvent {
+        FragmentEndEvent {
+            id: self.id,
+            interruption: true,
+        }
     }
 }
 
 #[derive(Debug, Clone, Copy, Event)]
-pub struct FragmentEndEvent(pub IdPair);
+pub struct FragmentEndEvent {
+    id: IdPair,
+    interruption: bool,
+}
 
 #[derive(Debug, Clone, Copy, Component)]
 #[component(storage = "SparseSet")]
@@ -109,23 +122,7 @@ pub enum BeginStage {
 pub enum EndStage {
     End,
     Visit,
-}
-
-#[derive(Debug, Clone, Copy, Component)]
-pub struct EventPath {
-    pub child: Option<Entity>,
-    pub end: EndStage,
-    pub begin: BeginStage,
-}
-
-impl Default for EventPath {
-    fn default() -> Self {
-        EventPath {
-            child: None,
-            end: EndStage::Visit,
-            begin: BeginStage::Visit,
-        }
-    }
+    Interrupt,
 }
 
 #[derive(Debug, Clone, Copy, Component)]
@@ -133,20 +130,6 @@ impl Default for EventPath {
 pub struct StageEventDown<Stage> {
     pub id: IdPair,
     _marker: PhantomData<Stage>,
-}
-
-impl<Stage> Event for StageEventDown<Stage>
-where
-    Stage: Send + Sync + 'static,
-{
-    const AUTO_PROPAGATE: bool = true;
-    type Traversal = &'static EventPath;
-}
-
-impl Traversal for &'static EventPath {
-    fn traverse(item: Self::Item<'_>) -> Option<Entity> {
-        item.child
-    }
 }
 
 macro_rules! callback {
@@ -202,6 +185,32 @@ callback!(OnBeginUp, BeginStage, InsertBeginUp, insert_begin_up);
 callback!(OnBeginDown, BeginStage, InsertBeginDown, insert_begin_down);
 callback!(OnEndUp, EndStage, InsertEndUp, insert_end_up);
 callback!(OnEndDown, EndStage, InsertEndDown, insert_end_down);
+
+#[derive(Clone, Component)]
+pub struct OnInterruptUp(pub Vec<Arc<Mutex<dyn FnMut(&mut World) + Send + Sync + 'static>>>);
+impl Default for OnInterruptUp {
+    fn default() -> Self {
+        OnInterruptUp(Vec::new())
+    }
+}
+
+pub trait InsertOnInterrupt {
+    fn insert_interrupt<F>(&mut self, hook: F) -> &mut Self
+    where
+        F: FnMut(&mut World) + Send + Sync + 'static;
+}
+
+impl InsertOnInterrupt for EntityCommands<'_> {
+    fn insert_interrupt<F>(&mut self, hook: F) -> &mut Self
+    where
+        F: FnMut(&mut World) + Send + Sync + 'static,
+    {
+        self.entry::<OnInterruptUp>()
+            .or_default()
+            .and_modify(move |mut ob| ob.0.push(Arc::new(Mutex::new(hook))));
+        self
+    }
+}
 
 pub struct MapContext<Stage> {
     pub target: Entity,
@@ -282,8 +291,6 @@ fn begin_recursive(
     }
 
     for system in on_begin.iter().flat_map(|o| o.0.iter()) {
-        // world.run_system_with_input(*system, event).unwrap();
-
         (system.lock().unwrap())(event, world);
     }
 
@@ -303,7 +310,6 @@ fn begin_recursive(
     }
 
     for system in on_begin_down.iter().flat_map(|o| o.0.iter()) {
-        // world.run_system_with_input(*system, event).unwrap();
         (system.lock().unwrap())(event, world);
     }
 
@@ -340,14 +346,20 @@ fn end_recursive(
     world: &mut World,
 ) -> Option<()> {
     let child = world.get_entity(node).ok()?;
-    let (parent_id, on_end, on_end_down, root, map) =
-        child
-            .get_components::<AnyOf<(&Parent, &OnEndUp, &OnEndDown, &Root, &MapFn<EndStage>)>>()?;
+    let (parent_id, on_end, on_end_down, interrupt, root, map) = child.get_components::<AnyOf<(
+        &Parent,
+        &OnEndUp,
+        &OnEndDown,
+        &OnInterruptUp,
+        &Root,
+        &MapFn<EndStage>,
+    )>>()?;
 
-    let (parent_id, on_end, on_end_down, root, map) = (
+    let (parent_id, on_end, on_end_down, interrupt, root, map) = (
         parent_id.map(|p| p.get()),
         on_end.cloned(),
         on_end_down.cloned(),
+        interrupt.cloned(),
         root.cloned(),
         map.cloned(),
     );
@@ -368,16 +380,23 @@ fn end_recursive(
         }
 
         for system in on_end.iter().flat_map(|o| o.0.iter()) {
-            // world.run_system_with_input(*system, event).unwrap();
             (system.lock().unwrap())(event, world);
         }
 
         let mut child = world.get_entity_mut(node).ok()?;
         let mut state = child.get_mut::<FragmentState>()?;
 
-        if matches!(event.stage, EndStage::End) {
-            state.completed += 1;
-            state.active = false;
+        match event.stage {
+            EndStage::End => {
+                state.completed += 1;
+                state.active = false;
+            }
+            EndStage::Interrupt => {
+                for system in interrupt.iter().flat_map(|o| o.0.iter()) {
+                    (system.lock().unwrap())(world);
+                }
+            }
+            _ => {}
         }
 
         if root.is_none() {
@@ -387,7 +406,6 @@ fn end_recursive(
         }
 
         for system in on_end_down.iter().flat_map(|o| o.0.iter()) {
-            // world.run_system_with_input(*system, event).unwrap();
             (system.lock().unwrap())(event, world);
         }
     }
@@ -401,11 +419,15 @@ pub(crate) fn end_world(mut reader: EventReader<FragmentEndEvent>, mut commands:
     commands.queue(move |world: &mut World| {
         for target in end_events {
             end_recursive(
-                target.0.fragment.0,
+                target.id.fragment.0,
                 None,
                 StageEvent {
-                    stage: EndStage::End,
-                    id: target.0,
+                    stage: if target.interruption {
+                        EndStage::Interrupt
+                    } else {
+                        EndStage::End
+                    },
+                    id: target.id,
                 },
                 world,
             );

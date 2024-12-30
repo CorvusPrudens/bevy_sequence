@@ -16,7 +16,7 @@ pub mod sequence;
 pub use always::AlwaysFragment;
 pub use delay::Delay;
 pub use evaluated::{Evaluated, EvaluatedWithId};
-pub use hooks::{OnEnd, OnStart, OnVisit};
+pub use hooks::{OnEnd, OnInterrupt, OnStart, OnVisit};
 pub use limit::Limit;
 pub use or::Or;
 pub use save::Save;
@@ -157,10 +157,32 @@ pub trait FragmentExt: Sized {
         hooks::on_visit(self, system)
     }
 
-    /// Synchronize this fragment's state with a [save::SavedSequence] component.
+    /// Run a system every time this fragment is interrupted.
+    ///
+    /// The system can accept a shared or mutable reference
+    /// to the fragment context with `InRef` in `InMut`.
+    ///
+    /// [OnInterrupt] systems will be run from bottom-to-top.
+    /// ```
+    /// (
+    ///     "fragment".on_interrupt(|| /* First */),
+    /// )
+    ///     .on_interrupt(|| /* Second */)
+    /// ```
+    fn on_interrupt<S, In, M>(self, system: S) -> OnInterrupt<Self, S, In, M>
+    where
+        S: IntoSystem<In, (), M> + Send + Sync + 'static,
+        In: SystemInput,
+    {
+        hooks::on_interrupt(self, system)
+    }
+
+    /// Synchronize this fragment's state with a [`SavedSequence`] component.
     ///
     /// Fragments with this component will automatically load any previously-saved
     /// state when spawned.
+    ///
+    /// [`SavedSequence`]: save::SavedSequence
     fn save_as(self, name: impl Into<Cow<'static, str>>) -> Save<Self>
     where
         Self: 'static,
@@ -168,6 +190,10 @@ pub trait FragmentExt: Sized {
         Save::new(self, name.into())
     }
 
+    /// Run a system after a delay.
+    ///
+    /// Once initiated, the queued system will execute
+    /// regardless of the fragment's state.
     fn delay<S, M>(self, delay: Duration, system: S) -> Delay<Self, S, M>
     where
         S: IntoSystem<(), (), M>,

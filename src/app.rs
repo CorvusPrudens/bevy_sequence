@@ -2,7 +2,9 @@ use crate::{
     combinators::CombinatorPlugin,
     fragment::{
         self,
-        event::{BeginStage, EndStage, MapFn, OnBeginDown, OnBeginUp, OnEndDown, OnEndUp},
+        event::{
+            BeginStage, EndStage, MapFn, OnBeginDown, OnBeginUp, OnEndDown, OnEndUp, OnInterruptUp,
+        },
     },
     prelude::*,
 };
@@ -49,6 +51,7 @@ impl Plugin for SequencePlugin {
         world.register_component::<OnBeginDown>();
         world.register_component::<OnEndUp>();
         world.register_component::<OnEndDown>();
+        world.register_component::<OnInterruptUp>();
         world.register_component::<MapFn<BeginStage>>();
         world.register_component::<MapFn<EndStage>>();
 

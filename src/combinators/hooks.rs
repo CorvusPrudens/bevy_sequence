@@ -1,4 +1,4 @@
-use crate::fragment::Context;
+use crate::fragment::{event::InsertOnInterrupt, Context};
 use bevy_ecs::prelude::*;
 use std::marker::PhantomData;
 
@@ -183,6 +183,59 @@ where
             let mut system = IntoSystem::<In, (), M>::into_system(self.system);
 
             move |_, world| {
+                <_ as AsInput<In>>::as_input(&context, |input| {
+                    // do we need to do this every time?
+                    system.initialize(world);
+                    system.run(input, world);
+                });
+
+                world.flush();
+            }
+        });
+
+        id
+    }
+}
+
+pub struct OnInterrupt<T, S, In, M> {
+    fragment: T,
+    system: S,
+    _marker: PhantomData<fn(In) -> M>,
+}
+
+pub fn on_interrupt<T, S, In, M>(fragment: T, system: S) -> OnInterrupt<T, S, In, M>
+where
+    S: IntoSystem<In, (), M> + Send + Sync + 'static,
+    In: bevy_ecs::system::SystemInput,
+{
+    OnInterrupt {
+        fragment,
+        system,
+        _marker: PhantomData,
+    }
+}
+
+impl<Data, C, T, S, In, M> IntoFragment<Data, C> for OnInterrupt<T, S, In, M>
+where
+    Data: Threaded,
+    S: IntoSystem<In, (), M> + Send + Sync + 'static,
+    T: IntoFragment<Data, C>,
+    In: bevy_ecs::system::SystemInput,
+    Context<C>: AsInput<In>,
+    C: Send + Sync + 'static,
+{
+    fn into_fragment(
+        self,
+        context: &Context<C>,
+        commands: &mut Commands,
+    ) -> crate::prelude::FragmentId {
+        let id = self.fragment.into_fragment(context, commands);
+
+        commands.entity(id.entity()).insert_interrupt({
+            let context = context.clone();
+            let mut system = IntoSystem::<In, (), M>::into_system(self.system);
+
+            move |world| {
                 <_ as AsInput<In>>::as_input(&context, |input| {
                     // do we need to do this every time?
                     system.initialize(world);
