@@ -16,7 +16,7 @@ impl EventId {
     pub fn new() -> Self {
         use rand::prelude::*;
 
-        Self(rand::thread_rng().gen())
+        Self(rand::rng().random())
     }
 }
 
