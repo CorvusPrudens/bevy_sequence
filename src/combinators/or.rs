@@ -1,6 +1,5 @@
 use crate::prelude::*;
 use bevy_ecs::prelude::*;
-use bevy_hierarchy::BuildChildren;
 
 /// Evaluate true for B when A is false.
 pub struct Or<A, B> {

@@ -27,7 +27,7 @@ macro_rules! children_frag {
     }
 }
 
-bevy_utils::all_tuples_with_size!(children_frag, 0, 15, T);
+variadics_please::all_tuples_with_size!(children_frag, 0, 15, T);
 
 // Update the `IntoChildren` trait to support arrays and vectors.
 // For arrays (with a const generic length) and for vectors of fragments.

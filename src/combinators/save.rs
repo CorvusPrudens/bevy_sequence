@@ -1,9 +1,7 @@
 use crate::prelude::*;
 use bevy_ecs::prelude::*;
-use bevy_hierarchy::Children;
 use bevy_log::prelude::*;
-use bevy_utils::hashbrown::hash_map::Entry;
-use bevy_utils::HashMap;
+use bevy_platform::collections::hash_map::{Entry, HashMap};
 use std::{any::TypeId, borrow::Cow, iter::zip};
 
 /// Save a tree with a given name.
@@ -114,7 +112,7 @@ pub(super) fn load_sequence(
     children: Query<&Children>,
     saved: Res<SavedSequences>,
 ) {
-    let source = trigger.entity();
+    let source = trigger.target();
 
     let Ok(mut sequence) = sequence.get_mut(source) else {
         return;

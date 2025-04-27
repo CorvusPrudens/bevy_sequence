@@ -1,9 +1,10 @@
 use crate::fragment::children::IntoChildren;
 use crate::prelude::*;
-use bevy_ecs::component::StorageType;
+use bevy_ecs::component::{
+    ComponentId, ComponentsRegistrator, Mutable, RequiredComponents, StorageType,
+};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::{IntoSystem, SystemId};
-use bevy_hierarchy::prelude::*;
 use std::marker::PhantomData;
 
 /// A combinator that selects exactly one fragment from a tuple based on a system's output.
@@ -38,26 +39,28 @@ pub(super) struct SelectActiveNode(usize);
 impl Component for SelectSystem {
     const STORAGE_TYPE: StorageType = StorageType::Table;
 
+    type Mutability = Mutable;
+
     fn register_component_hooks(hooks: &mut bevy_ecs::component::ComponentHooks) {
-        hooks.on_remove(|mut world, entity, _| {
-            let eval = world.get::<SelectSystem>(entity).unwrap().0;
+        hooks.on_remove(|mut world, ctx| {
+            let eval = world.get::<SelectSystem>(ctx.entity).unwrap().0;
             world.commands().unregister_system(eval);
         });
     }
 
     fn register_required_components(
-        component_id: bevy_ecs::component::ComponentId,
-        components: &mut bevy_ecs::component::Components,
-        storages: &mut bevy_ecs::storage::Storages,
-        required_components: &mut bevy_ecs::component::RequiredComponents,
+        component_id: ComponentId,
+        components: &mut ComponentsRegistrator,
+        required_components: &mut RequiredComponents,
         inheritance_depth: u16,
+        recursion_check_stack: &mut Vec<ComponentId>,
     ) {
         <Fragment as bevy_ecs::component::Component>::register_required_components(
             component_id,
             components,
-            storages,
             required_components,
-            inheritance_depth + 1,
+            inheritance_depth,
+            recursion_check_stack,
         );
     }
 }

@@ -1,10 +1,8 @@
-use std::sync::{Arc, RwLock};
-
 use crate::combinators::or::OrItem;
 use crate::evaluate::{Evaluate, Evaluation};
 use crate::Threaded;
 use bevy_ecs::prelude::*;
-use bevy_hierarchy::prelude::*;
+use std::sync::{Arc, RwLock};
 
 pub mod children;
 pub mod event;
@@ -113,7 +111,7 @@ fn descend_tree(
         } else {
             let mut first_eval = None;
             for child in children.iter().flat_map(|c| c.iter()) {
-                descend_tree(*child, new_eval, fragments, leaves, &mut first_eval);
+                descend_tree(child, new_eval, fragments, leaves, &mut first_eval);
             }
         }
     }

@@ -1,7 +1,6 @@
 use super::{FragmentState, Root, SelectedFragments};
 use crate::prelude::FragmentId;
-use bevy_ecs::{prelude::*, system::SystemId};
-use bevy_hierarchy::Parent;
+use bevy_ecs::{component::Mutable, prelude::*, system::SystemId};
 use std::{
     marker::PhantomData,
     sync::{Arc, Mutex},
@@ -109,7 +108,7 @@ where
     Stage: Send + Sync + 'static,
 {
     const AUTO_PROPAGATE: bool = true;
-    type Traversal = &'static Parent;
+    type Traversal = &'static ChildOf;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -228,7 +227,7 @@ impl<Stage> MapFn<Stage> {
     fn call(&self, world: &mut World, context: MapContext<Stage>) -> StageEvent<Stage> {
         match self {
             MapFn::Function(function) => function(context),
-            MapFn::System(sys) => world.run_system_with_input(*sys, context).unwrap(),
+            MapFn::System(sys) => world.run_system_with(*sys, context).unwrap(),
         }
     }
 }
@@ -245,9 +244,11 @@ impl<Stage: 'static> MapFn<Stage> {
 impl<Stage: Send + 'static> Component for MapFn<Stage> {
     const STORAGE_TYPE: bevy_ecs::component::StorageType = bevy_ecs::component::StorageType::Table;
 
+    type Mutability = Mutable;
+
     fn register_component_hooks(hooks: &mut bevy_ecs::component::ComponentHooks) {
-        hooks.on_remove(|mut world, entity, _| {
-            let map = world.get::<MapFn<Stage>>(entity).unwrap();
+        hooks.on_remove(|mut world, ctx| {
+            let map = world.get::<MapFn<Stage>>(ctx.entity).unwrap();
             if let MapFn::System(system) = map {
                 let system = *system;
                 world.commands().unregister_system(system);
@@ -264,7 +265,7 @@ fn begin_recursive(
 ) -> Option<()> {
     let child = world.get_entity(node).ok()?;
     let (parent_id, on_begin, on_begin_down, root, map) = child.get_components::<AnyOf<(
-        &Parent,
+        &ChildOf,
         &OnBeginUp,
         &OnBeginDown,
         &Root,
@@ -272,7 +273,7 @@ fn begin_recursive(
     )>>()?;
 
     let (parent_id, on_begin, on_begin_down, root, map) = (
-        parent_id.map(|p| p.get()),
+        parent_id.map(|p| p.parent()),
         on_begin.cloned(),
         on_begin_down.cloned(),
         root.cloned(),
@@ -347,7 +348,7 @@ fn end_recursive(
 ) -> Option<()> {
     let child = world.get_entity(node).ok()?;
     let (parent_id, on_end, on_end_down, interrupt, root, map) = child.get_components::<AnyOf<(
-        &Parent,
+        &ChildOf,
         &OnEndUp,
         &OnEndDown,
         &OnInterruptUp,
@@ -356,7 +357,7 @@ fn end_recursive(
     )>>()?;
 
     let (parent_id, on_end, on_end_down, interrupt, root, map) = (
-        parent_id.map(|p| p.get()),
+        parent_id.map(|p| p.parent()),
         on_end.cloned(),
         on_end_down.cloned(),
         interrupt.cloned(),

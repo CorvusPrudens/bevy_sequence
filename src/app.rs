@@ -9,7 +9,8 @@ use crate::{
     prelude::*,
 };
 use bevy_app::prelude::*;
-use bevy_ecs::{prelude::*, schedule::ScheduleLabel};
+use bevy_ecs::{prelude::*, schedule::ScheduleLabel, system::ScheduleSystem};
+use bevy_platform::collections::HashSet;
 use std::any::TypeId;
 
 /// `bevy_sequence`'s plugin.
@@ -63,7 +64,7 @@ impl Plugin for SequencePlugin {
                 PreUpdate,
                 (
                     crate::fragment::select_fragments.in_set(SequenceSets::Select),
-                    apply_deferred
+                    ApplyDeferred
                         .after(SequenceSets::Evaluate)
                         .before(SequenceSets::Select),
                     crate::fragment::event::begin_world.in_set(SequenceSets::Emit),
@@ -92,7 +93,7 @@ impl Plugin for SequencePlugin {
 }
 
 #[derive(Resource, Default)]
-struct AddedSystems(bevy_utils::HashSet<TypeId>);
+struct AddedSystems(HashSet<TypeId>);
 
 /// Insert systems into a schedule.
 ///
@@ -100,7 +101,7 @@ struct AddedSystems(bevy_utils::HashSet<TypeId>);
 pub fn add_systems_checked<M, S, C>(world: &mut World, schedule: S, systems: C)
 where
     S: ScheduleLabel,
-    C: IntoSystemConfigs<M> + Send + 'static,
+    C: IntoScheduleConfigs<ScheduleSystem, M> + 'static,
 {
     let id = TypeId::of::<(S, C)>();
     let mut pairs = world.get_resource_or_insert_with(AddedSystems::default);
@@ -118,14 +119,14 @@ pub trait AddSystemsChecked: Sized {
     fn add_systems_checked<M, S, C>(&mut self, schedule: S, systems: C)
     where
         S: ScheduleLabel,
-        C: IntoSystemConfigs<M> + Send + 'static;
+        C: IntoScheduleConfigs<ScheduleSystem, M> + Send + 'static;
 }
 
 impl AddSystemsChecked for Commands<'_, '_> {
     fn add_systems_checked<M, S, C>(&mut self, schedule: S, systems: C)
     where
         S: ScheduleLabel,
-        C: IntoSystemConfigs<M> + Send + 'static,
+        C: IntoScheduleConfigs<ScheduleSystem, M> + Send + 'static,
     {
         self.queue(|world: &mut World| {
             add_systems_checked(world, schedule, systems);

@@ -1,5 +1,5 @@
 use crate::prelude::*;
-use bevy_ecs::component::StorageType;
+use bevy_ecs::component::{Mutable, StorageType};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemId;
 use std::marker::PhantomData;
@@ -27,9 +27,11 @@ pub struct EvalSystemId(SystemId<In<FragmentId>, Evaluation>);
 impl Component for EvalSystemId {
     const STORAGE_TYPE: StorageType = StorageType::Table;
 
+    type Mutability = Mutable;
+
     fn register_component_hooks(hooks: &mut bevy_ecs::component::ComponentHooks) {
-        hooks.on_remove(|mut world, entity, _| {
-            let eval = world.get::<EvalSystemId>(entity).unwrap().0;
+        hooks.on_remove(|mut world, ctx| {
+            let eval = world.get::<EvalSystemId>(ctx.entity).unwrap().0;
             world.commands().unregister_system(eval);
         });
     }
@@ -60,9 +62,7 @@ pub(super) fn custom_evals_ids(
 
     commands.queue(|world: &mut World| {
         for (e, system) in systems {
-            let evaluation = world
-                .run_system_with_input(system.0, FragmentId::new(e))
-                .unwrap();
+            let evaluation = world.run_system_with(system.0, FragmentId::new(e)).unwrap();
             let mut entity_eval = world.entity_mut(e);
             let mut entity_eval = entity_eval.get_mut::<Evaluation>().unwrap();
             entity_eval.merge(evaluation);
@@ -93,9 +93,11 @@ pub struct EvalSystem(SystemId<(), Evaluation>);
 impl Component for EvalSystem {
     const STORAGE_TYPE: StorageType = StorageType::Table;
 
+    type Mutability = Mutable;
+
     fn register_component_hooks(hooks: &mut bevy_ecs::component::ComponentHooks) {
-        hooks.on_remove(|mut world, entity, _| {
-            let eval = world.get::<EvalSystemId>(entity).unwrap().0;
+        hooks.on_remove(|mut world, ctx| {
+            let eval = world.get::<EvalSystemId>(ctx.entity).unwrap().0;
             world.commands().unregister_system(eval);
         });
     }

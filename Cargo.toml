@@ -9,25 +9,27 @@ reflect = ["dep:bevy_reflect"]
 serde = ["dep:serde"]
 
 [dependencies]
-bevy_ecs = "0.15"
-bevy_app = "0.15"
-bevy_utils = "0.15"
-bevy_log = "0.15"
-bevy_time = "0.15"
-bevy_hierarchy = "0.15"
-bevy_reflect = { version = "0.15", optional = true }
+bevy_ecs = "0.16"
+bevy_app = "0.16"
+bevy_utils = "0.16"
+bevy_platform = "0.16"
+bevy_log = "0.16"
+bevy_time = "0.16"
+bevy_reflect = { version = "0.16", optional = true }
 rand = "0.8"
 serde = { version = "1.0", features = ["derive"], optional = true }
+variadics_please = "1.1.0"
 
 [dev-dependencies]
-bevy = { version = "0.15", default-features = false, features = [
-  "bevy_debug_stepping",
-  "bevy_asset",
-  "bevy_audio",
-  "bevy_color",
-  "bevy_state",
-  "multi_threaded",
-  "sysinfo_plugin",
+bevy = { version = "0.16", default-features = false, features = [
+    "std",
+    "bevy_debug_stepping",
+    "bevy_asset",
+    "bevy_audio",
+    "bevy_color",
+    "bevy_state",
+    "multi_threaded",
+    "sysinfo_plugin",
 ] }
 criterion = { version = "0.5" }
 serde_json = "1.0"

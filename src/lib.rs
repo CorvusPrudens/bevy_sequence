@@ -65,7 +65,7 @@ pub mod prelude {
     pub use crate::fragment::event::{EventId, FragmentEndEvent, FragmentEvent, IdPair};
 
     pub use crate::combinators::{
-        distribution::{choice, distribution},
+        //distribution::{choice, distribution},
         select::select,
         FragmentExt,
     };

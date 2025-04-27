@@ -1,7 +1,6 @@
 use crate::{app::AddSystemsChecked, fragment::children::IntoChildren, prelude::*};
 use bevy_app::PreUpdate;
 use bevy_ecs::prelude::*;
-use bevy_hierarchy::prelude::*;
 use rand::distributions::{uniform::SampleUniform, WeightedIndex};
 
 /// A fragment that randomly selects its children.
@@ -18,6 +17,8 @@ pub fn choice<F>(fragments: F) -> ChoiceFragment<F> {
     ChoiceFragment { fragments }
 }
 
+pub fn test() {}
+
 impl<D, C, F> IntoFragment<D, C> for ChoiceFragment<F>
 where
     D: Threaded,
@@ -27,7 +28,7 @@ where
         let children = self.fragments.into_children(context, commands);
         commands.add_systems_checked(
             PreUpdate,
-            update_distribution_items::<u32>.in_set(SequenceSets::Evaluate),
+            test.in_set(SequenceSets::Evaluate),
         );
 
         let mut entity = commands.spawn((Fragment, DistributionActiveNode(0)));
@@ -106,7 +107,7 @@ macro_rules! distribution_implementation {
     };
 }
 
-bevy_utils::all_tuples_with_size!(distribution_implementation, 1, 15, T);
+variadics_please::all_tuples_with_size!(distribution_implementation, 1, 15, T);
 
 pub(super) fn update_distribution_items<X>(
     mut choices: Query<(
@@ -134,7 +135,7 @@ pub(super) fn update_distribution_items<X>(
         };
 
         for (i, child) in children.iter().enumerate() {
-            let Ok(mut evaluation) = children_query.get_mut(*child) else {
+            let Ok(mut evaluation) = children_query.get_mut(child) else {
                 continue;
             };
             evaluation.merge((selection == i).evaluate());

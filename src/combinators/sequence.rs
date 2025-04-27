@@ -1,7 +1,6 @@
 use crate::fragment::event::{BeginStage, EndStage, MapContext, MapFn, StageEvent};
 use crate::prelude::*;
 use bevy_ecs::prelude::*;
-use bevy_hierarchy::prelude::*;
 
 #[derive(Component)]
 #[require(Fragment)]
@@ -17,7 +16,7 @@ pub(super) fn update_sequence_items(
         // look for the first item that has finished equal to the container
         let mut first_selected = false;
         for child in seq.iter() {
-            let Ok((mut eval, state)) = children.get_mut(*child) else {
+            let Ok((mut eval, state)) = children.get_mut(child) else {
                 continue;
             };
 
@@ -102,4 +101,4 @@ macro_rules! seq_frag {
     };
 }
 
-bevy_utils::all_tuples_with_size!(seq_frag, 0, 15, T);
+variadics_please::all_tuples_with_size!(seq_frag, 0, 15, T);
