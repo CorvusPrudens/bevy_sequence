@@ -7,7 +7,21 @@ use bevy_time::{Time, Timer, TimerMode};
 use std::{marker::PhantomData, time::Duration};
 
 #[derive(Component, Clone)]
-pub(crate) struct AfterSystem(SystemId, Timer);
+pub struct AfterSystem {
+    id: SystemId,
+    timer: Timer,
+    paused: bool,
+}
+
+impl AfterSystem {
+    pub fn pause(&mut self) {
+        self.paused = true;
+    }
+
+    pub fn unpause(&mut self) {
+        self.paused = false;
+    }
+}
 
 /// Run a one-shot system after the specified delay.
 pub fn run_after<M>(
@@ -16,7 +30,11 @@ pub fn run_after<M>(
     commands: &mut Commands,
 ) {
     let system = commands.register_system(system);
-    commands.spawn(AfterSystem(system, Timer::new(delay, TimerMode::Once)));
+    commands.spawn(AfterSystem {
+        id: system,
+        timer: Timer::new(delay, TimerMode::Once),
+        paused: false,
+    });
 }
 
 pub(super) fn manage_delay(
@@ -25,10 +43,12 @@ pub(super) fn manage_delay(
     mut commands: Commands,
 ) {
     for (entity, mut sys) in q.iter_mut() {
-        sys.1.tick(time.delta());
-        if sys.1.finished() {
-            commands.run_system(sys.0);
-            commands.entity(entity).despawn();
+        if !sys.paused {
+            sys.timer.tick(time.delta());
+            if sys.timer.finished() {
+                commands.run_system(sys.id);
+                commands.entity(entity).despawn();
+            }
         }
     }
 }
@@ -65,10 +85,11 @@ where
             .entity(id.entity())
             .insert_end_down(move |stage, world| {
                 if matches!(stage.stage, EndStage::End) {
-                    world.commands().spawn(AfterSystem(
-                        system,
-                        Timer::new(self.duration, TimerMode::Once),
-                    ));
+                    world.commands().spawn(AfterSystem {
+                        id: system,
+                        timer: Timer::new(self.duration, TimerMode::Once),
+                        paused: false,
+                    });
                 }
             });
 
