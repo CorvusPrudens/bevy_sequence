@@ -88,7 +88,7 @@ pub trait FragmentExt: Sized {
 
     /// Add an evaluation to this fragment.
     ///
-    /// This will pass the fragment's ID to the provided systme.
+    /// This will pass the fragment's ID to the provided system.
     fn eval_id<S, O, M>(self, system: S) -> EvaluatedWithId<Self, S, O, M>
     where
         S: IntoSystem<In<FragmentId>, O, M> + 'static,

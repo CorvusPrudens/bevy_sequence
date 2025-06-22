@@ -108,7 +108,7 @@ impl EvaluatedFragments {
         self.evaluations.get(&id).copied()
     }
 
-    /// Returns whether the provided ID should be further evaulated.
+    /// Returns whether the provided ID should be further evaluated.
     ///
     /// An ID not in the set will always return false.
     pub fn is_candidate(&self, id: FragmentId) -> bool {
