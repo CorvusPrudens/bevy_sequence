@@ -101,4 +101,4 @@ macro_rules! seq_frag {
     };
 }
 
-variadics_please::all_tuples_with_size!(seq_frag, 0, 15, T);
+variadics_please::all_tuples_with_size!(seq_frag, 0, 23, T);
