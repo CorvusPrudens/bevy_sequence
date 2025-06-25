@@ -1,7 +1,7 @@
 use crate::{app::AddSystemsChecked, fragment::children::IntoChildren, prelude::*};
 use bevy_app::PreUpdate;
 use bevy_ecs::prelude::*;
-use rand::distributions::{uniform::SampleUniform, WeightedIndex};
+use rand::distributions::{WeightedIndex, uniform::SampleUniform};
 
 /// A fragment that randomly selects its children.
 ///
@@ -26,10 +26,7 @@ where
 {
     fn into_fragment(self, context: &Context<C>, commands: &mut Commands) -> FragmentId {
         let children = self.fragments.into_children(context, commands);
-        commands.add_systems_checked(
-            PreUpdate,
-            test.in_set(SequenceSets::Evaluate),
-        );
+        commands.add_systems_checked(PreUpdate, test.in_set(SequenceSets::Evaluate));
 
         let mut entity = commands.spawn((Fragment, DistributionActiveNode(0)));
 

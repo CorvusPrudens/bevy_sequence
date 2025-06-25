@@ -16,7 +16,7 @@ bevy_platform = "0.16"
 bevy_log = "0.16"
 bevy_time = "0.16"
 bevy_reflect = { version = "0.16", optional = true }
-rand = "0.9"
+rand = "0.8"
 serde = { version = "1.0", features = ["derive"], optional = true }
 variadics_please = "1.1.0"
 
