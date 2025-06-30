@@ -116,20 +116,22 @@ pub trait AddSystemsChecked: Sized {
     /// Queues inserting systems into a schedule.
     ///
     /// This will only insert a set of systems into a given schedule once.
-    fn add_systems_checked<M, S, C>(&mut self, schedule: S, systems: C)
+    fn add_systems_checked<M, S, F, C>(&mut self, schedule: S, systems: F)
     where
         S: ScheduleLabel,
-        C: IntoScheduleConfigs<ScheduleSystem, M> + Send + 'static;
+        F: Fn() -> C + Send + Sync + 'static,
+        C: IntoScheduleConfigs<ScheduleSystem, M> + 'static;
 }
 
 impl AddSystemsChecked for Commands<'_, '_> {
-    fn add_systems_checked<M, S, C>(&mut self, schedule: S, systems: C)
+    fn add_systems_checked<M, S, F, C>(&mut self, schedule: S, systems: F)
     where
         S: ScheduleLabel,
-        C: IntoScheduleConfigs<ScheduleSystem, M> + Send + 'static,
+        F: Fn() -> C + Send + Sync + 'static,
+        C: IntoScheduleConfigs<ScheduleSystem, M> + 'static,
     {
-        self.queue(|world: &mut World| {
-            add_systems_checked(world, schedule, systems);
+        self.queue(move |world: &mut World| {
+            add_systems_checked(world, schedule, systems());
         });
     }
 }

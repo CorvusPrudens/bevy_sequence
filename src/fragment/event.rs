@@ -135,7 +135,13 @@ macro_rules! callback {
     ($name:ident, $stage:ty, $tr:ident, $method:ident) => {
         #[derive(Clone, Component)]
         pub struct $name(
-            pub Vec<Arc<Mutex<dyn FnMut(StageEvent<$stage>, &mut World) + Send + Sync + 'static>>>,
+            pub  Vec<
+                Arc<
+                    Mutex<
+                        dyn FnMut(StageEvent<$stage>, &mut World) -> Result + Send + Sync + 'static,
+                    >,
+                >,
+            >,
         );
 
         impl Default for $name {
@@ -163,13 +169,13 @@ macro_rules! callback {
         pub trait $tr {
             fn $method<F>(&mut self, hook: F) -> &mut Self
             where
-                F: FnMut(StageEvent<$stage>, &mut World) + Send + Sync + 'static;
+                F: FnMut(StageEvent<$stage>, &mut World) -> Result + Send + Sync + 'static;
         }
 
         impl $tr for EntityCommands<'_> {
             fn $method<F>(&mut self, hook: F) -> &mut Self
             where
-                F: FnMut(StageEvent<$stage>, &mut World) + Send + Sync + 'static,
+                F: FnMut(StageEvent<$stage>, &mut World) -> Result + Send + Sync + 'static,
             {
                 self.entry::<$name>()
                     .or_default()
@@ -186,7 +192,10 @@ callback!(OnEndUp, EndStage, InsertEndUp, insert_end_up);
 callback!(OnEndDown, EndStage, InsertEndDown, insert_end_down);
 
 #[derive(Clone, Component)]
-pub struct OnInterruptUp(pub Vec<Arc<Mutex<dyn FnMut(&mut World) + Send + Sync + 'static>>>);
+pub struct OnInterruptUp(
+    pub Vec<Arc<Mutex<dyn FnMut(&mut World) -> Result + Send + Sync + 'static>>>,
+);
+
 impl Default for OnInterruptUp {
     fn default() -> Self {
         OnInterruptUp(Vec::new())
@@ -196,13 +205,13 @@ impl Default for OnInterruptUp {
 pub trait InsertOnInterrupt {
     fn insert_interrupt<F>(&mut self, hook: F) -> &mut Self
     where
-        F: FnMut(&mut World) + Send + Sync + 'static;
+        F: FnMut(&mut World) -> Result + Send + Sync + 'static;
 }
 
 impl InsertOnInterrupt for EntityCommands<'_> {
     fn insert_interrupt<F>(&mut self, hook: F) -> &mut Self
     where
-        F: FnMut(&mut World) + Send + Sync + 'static,
+        F: FnMut(&mut World) -> Result + Send + Sync + 'static,
     {
         self.entry::<OnInterruptUp>()
             .or_default()
@@ -262,15 +271,17 @@ fn begin_recursive(
     child_node: Option<Entity>,
     mut event: StageEvent<BeginStage>,
     world: &mut World,
-) -> Option<()> {
-    let child = world.get_entity(node).ok()?;
-    let (parent_id, on_begin, on_begin_down, root, map) = child.get_components::<AnyOf<(
+) -> Result {
+    let child = world.get_entity(node)?;
+    let Some((parent_id, on_begin, on_begin_down, root, map)) = child.get_components::<AnyOf<(
         &ChildOf,
         &OnBeginUp,
         &OnBeginDown,
         &Root,
         &MapFn<BeginStage>,
-    )>>()?;
+    )>>() else {
+        return Ok(());
+    };
 
     let (parent_id, on_begin, on_begin_down, root, map) = (
         parent_id.map(|p| p.parent()),
@@ -292,11 +303,13 @@ fn begin_recursive(
     }
 
     for system in on_begin.iter().flat_map(|o| o.0.iter()) {
-        (system.lock().unwrap())(event, world);
+        (system.lock().unwrap())(event, world)?;
     }
 
-    let mut child = world.get_entity_mut(node).ok()?;
-    let mut state = child.get_mut::<FragmentState>()?;
+    let mut child = world.get_entity_mut(node)?;
+    let mut state = child
+        .get_mut::<FragmentState>()
+        .ok_or("expected `FragmentState` component on fragment entity")?;
 
     if matches!(event.stage, BeginStage::Start) {
         state.triggered += 1;
@@ -306,18 +319,18 @@ fn begin_recursive(
 
     if root.is_none() {
         if let Some(parent) = parent_id {
-            begin_recursive(parent, Some(node), event, world);
+            begin_recursive(parent, Some(node), event, world)?;
         }
     }
 
     for system in on_begin_down.iter().flat_map(|o| o.0.iter()) {
-        (system.lock().unwrap())(event, world);
+        (system.lock().unwrap())(event, world)?;
     }
 
-    Some(())
+    Ok(())
 }
 
-pub(crate) fn begin_world(world: &mut World) {
+pub(crate) fn begin_world(world: &mut World) -> Result {
     let targets = world
         .get_resource::<SelectedFragments>()
         .map(|sf| sf.0.clone())
@@ -336,8 +349,10 @@ pub(crate) fn begin_world(world: &mut World) {
                 },
             },
             world,
-        );
+        )?;
     }
+
+    Ok(())
 }
 
 fn end_recursive(
@@ -345,16 +360,20 @@ fn end_recursive(
     child_node: Option<Entity>,
     mut event: StageEvent<EndStage>,
     world: &mut World,
-) -> Option<()> {
-    let child = world.get_entity(node).ok()?;
-    let (parent_id, on_end, on_end_down, interrupt, root, map) = child.get_components::<AnyOf<(
-        &ChildOf,
-        &OnEndUp,
-        &OnEndDown,
-        &OnInterruptUp,
-        &Root,
-        &MapFn<EndStage>,
-    )>>()?;
+) -> Result {
+    let child = world.get_entity(node)?;
+    let Some((parent_id, on_end, on_end_down, interrupt, root, map)) = child
+        .get_components::<AnyOf<(
+            &ChildOf,
+            &OnEndUp,
+            &OnEndDown,
+            &OnInterruptUp,
+            &Root,
+            &MapFn<EndStage>,
+        )>>()
+    else {
+        return Ok(());
+    };
 
     let (parent_id, on_end, on_end_down, interrupt, root, map) = (
         parent_id.map(|p| p.parent()),
@@ -365,8 +384,10 @@ fn end_recursive(
         map.cloned(),
     );
 
-    let mut child = world.get_entity_mut(node).ok()?;
-    let mut state = child.get_mut::<FragmentState>()?;
+    let mut child = world.get_entity_mut(node)?;
+    let mut state = child
+        .get_mut::<FragmentState>()
+        .ok_or("expected `FragmentState` component on fragment entity")?;
 
     if state.active_events.remove(event.id.event) {
         if let Some(map) = map {
@@ -381,11 +402,13 @@ fn end_recursive(
         }
 
         for system in on_end.iter().flat_map(|o| o.0.iter()) {
-            (system.lock().unwrap())(event, world);
+            (system.lock().unwrap())(event, world)?;
         }
 
-        let mut child = world.get_entity_mut(node).ok()?;
-        let mut state = child.get_mut::<FragmentState>()?;
+        let mut child = world.get_entity_mut(node)?;
+        let mut state = child
+            .get_mut::<FragmentState>()
+            .ok_or("expected `FragmentState` component on fragment entity")?;
 
         match event.stage {
             EndStage::End => {
@@ -394,7 +417,7 @@ fn end_recursive(
             }
             EndStage::Interrupt => {
                 for system in interrupt.iter().flat_map(|o| o.0.iter()) {
-                    (system.lock().unwrap())(world);
+                    (system.lock().unwrap())(world)?;
                 }
             }
             _ => {}
@@ -402,22 +425,22 @@ fn end_recursive(
 
         if root.is_none() {
             if let Some(parent) = parent_id {
-                end_recursive(parent, Some(node), event, world);
+                end_recursive(parent, Some(node), event, world)?;
             }
         }
 
         for system in on_end_down.iter().flat_map(|o| o.0.iter()) {
-            (system.lock().unwrap())(event, world);
+            (system.lock().unwrap())(event, world)?;
         }
     }
 
-    Some(())
+    Ok(())
 }
 
 pub(crate) fn end_world(mut reader: EventReader<FragmentEndEvent>, mut commands: Commands) {
     let end_events: Vec<_> = reader.read().copied().collect();
 
-    commands.queue(move |world: &mut World| {
+    commands.queue(move |world: &mut World| -> Result {
         for target in end_events {
             end_recursive(
                 target.id.fragment.0,
@@ -431,7 +454,9 @@ pub(crate) fn end_world(mut reader: EventReader<FragmentEndEvent>, mut commands:
                     id: target.id,
                 },
                 world,
-            );
+            )?;
         }
+
+        Ok(())
     });
 }

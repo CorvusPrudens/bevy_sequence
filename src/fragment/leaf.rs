@@ -41,6 +41,8 @@ where
                     id: event.id,
                     data: data.clone(),
                 });
+
+                Ok(())
             })
             .id();
 

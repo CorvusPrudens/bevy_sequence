@@ -4,7 +4,7 @@ use std::{borrow::Cow, time::Duration};
 
 pub mod always;
 pub mod delay;
-// pub mod distribution;
+pub mod distribution;
 pub mod evaluated;
 pub mod hooks;
 pub mod limit;
@@ -109,10 +109,10 @@ pub trait FragmentExt: Sized {
     /// )
     ///     .on_start(|| /* First */)
     /// ```
-    fn on_start<S, In, M>(self, system: S) -> OnStart<Self, S, In, M>
-    where
-        S: IntoSystem<In, (), M> + Send + Sync + 'static,
-        In: SystemInput,
+    fn on_start<S, In, Out, M>(self, system: S) -> OnStart<Self, S, In, Out, M>
+// where
+    //     S: IntoSystem<In, Out, M> + Send + Sync + 'static,
+    //     In: SystemInput,
     {
         hooks::on_start(self, system)
     }
@@ -129,10 +129,10 @@ pub trait FragmentExt: Sized {
     /// )
     ///     .on_end(|| /* Second */)
     /// ```
-    fn on_end<S, In, M>(self, system: S) -> OnEnd<Self, S, In, M>
-    where
-        S: IntoSystem<In, (), M> + Send + Sync + 'static,
-        In: SystemInput,
+    fn on_end<S, In, Out, M>(self, system: S) -> OnEnd<Self, S, In, Out, M>
+// where
+    //     S: IntoSystem<In, Out, M> + Send + Sync + 'static,
+    //     In: SystemInput,
     {
         hooks::on_end(self, system)
     }
@@ -149,10 +149,10 @@ pub trait FragmentExt: Sized {
     /// )
     ///     .on_end(|| /* First */)
     /// ```
-    fn on_visit<S, In, M>(self, system: S) -> OnVisit<Self, S, In, M>
-    where
-        S: IntoSystem<In, (), M> + Send + Sync + 'static,
-        In: SystemInput,
+    fn on_visit<S, In, Out, M>(self, system: S) -> OnVisit<Self, S, In, Out, M>
+// where
+    //     S: IntoSystem<In, Out, M> + Send + Sync + 'static,
+    //     In: SystemInput,
     {
         hooks::on_visit(self, system)
     }
@@ -169,10 +169,10 @@ pub trait FragmentExt: Sized {
     /// )
     ///     .on_interrupt(|| /* Second */)
     /// ```
-    fn on_interrupt<S, In, M>(self, system: S) -> OnInterrupt<Self, S, In, M>
-    where
-        S: IntoSystem<In, (), M> + Send + Sync + 'static,
-        In: SystemInput,
+    fn on_interrupt<S, In, Out, M>(self, system: S) -> OnInterrupt<Self, S, In, Out, M>
+// where
+    //     S: IntoSystem<In, Out, M> + Send + Sync + 'static,
+    //     In: SystemInput,
     {
         hooks::on_interrupt(self, system)
     }

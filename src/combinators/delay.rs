@@ -91,6 +91,8 @@ where
                         paused: false,
                     });
                 }
+
+                Ok(())
             });
 
         id

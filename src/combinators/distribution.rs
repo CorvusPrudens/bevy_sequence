@@ -26,7 +26,7 @@ where
 {
     fn into_fragment(self, context: &Context<C>, commands: &mut Commands) -> FragmentId {
         let children = self.fragments.into_children(context, commands);
-        commands.add_systems_checked(PreUpdate, test.in_set(SequenceSets::Evaluate));
+        commands.add_systems_checked(PreUpdate, || test.in_set(SequenceSets::Evaluate));
 
         let mut entity = commands.spawn((Fragment, DistributionActiveNode(0)));
 
@@ -82,7 +82,7 @@ macro_rules! distribution_implementation {
             fn into_fragment(self, context: &Context<C>, commands: &mut Commands) -> FragmentId {
                 let ($($ty,)*) = self.fragments;
                 let children = [$($ty.into_fragment(context, commands) .entity()),*];
-                commands.add_systems_checked(PreUpdate, update_distribution_items::<D>.in_set(SequenceSets::Evaluate));
+                commands.add_systems_checked(PreUpdate, || update_distribution_items::<D>.in_set(SequenceSets::Evaluate));
 
                 let mut entity = commands
                     .spawn(DistributionActiveNode(0));
